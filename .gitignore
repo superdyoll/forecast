@@ -8,3 +8,5 @@ runs/
 build/
 dist/
 *.egg-info/
+sim-run/
+lowpower-state/

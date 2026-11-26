@@ -19,9 +19,13 @@ forecast = "scout_forecast.forecast:main"
 scout-evaluate = "scout_forecast.evaluate:main"
 scout-data = "scout_forecast.data:main"
 scout-lowpower = "scout_forecast.lowpower.service:main"
+scout-web = "scout_forecast.web:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "scout_forecast.__version__" }
+
+[tool.setuptools.package-data]
+scout_forecast = ["static/*.html"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

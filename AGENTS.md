@@ -36,7 +36,10 @@ inputs and may not exist in a fresh clone.
 | `model/lstm/train_lstm.py` | Experimental. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. Not part of the package: the package must never import or mention it. It depends on the package (`pip install -e .`) plus `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
 | `src/scout_forecast/lowpower/` | **Low-power mode service** (stdlib only): `planner.py` (pure decision logic), `mission.py` (operator mission file), `mavlink.py` (MAVLink v2 codec + self-reconnecting tcp/udp/serial links), `service.py` (`scout-lowpower run / set-mission / status / plan`). Survives link loss, autopilot restarts (resync, mission check, re-arm), operator overrides and its own restarts. |
 | `tests/` | `python -m unittest discover -s tests` (with the package installed). Planner decision tests, MAVLink codec tests (byte-for-byte vs pymavlink if installed) and a service recovery test against `tests/fake_autopilot.py` (~20 s). |
-| SITL sim, web page, systemd units | Not started yet |
+| `src/scout_forecast/web.py` + `static/index.html` | `scout-web`: forecast vs actual page (stdlib server, no external assets, localhost by default). Reads the service's `decision.json` / `history.jsonl`; `/api/hindcast` forecasts past periods from the CSV. |
+| `src/scout_forecast/clock.py` | Shared simulated clock (`SCOUT_CLOCK`); the service plans with `clock.now()`. |
+| `sim/` | **Separate package `scout-sim`** (never on the boat): environment (current, wind, cloud) pushed into ArduPilot 4.0 SITL as `SIM_TIDE` drift, and a power model publishing `BATTERY_STATUS` to the service's `--power-link`. `sim/run_sitl.sh` runs SITL (docker `radarku/ardupilot-sitl`) + sim + service + web. |
+| systemd units | Not started yet |
 
 Update this table when you add components.
 
@@ -85,8 +88,13 @@ scout-lowpower run --mavlink tcp:127.0.0.1:5760 --params runs/physical/<ts>/para
 scout-lowpower status                       # current decision (decision.json)
 scout-lowpower plan --lat 60.2 --lon 2.2 --pct 55   # what-if, no autopilot
 
+# Simulation: SITL (docker) + scout-sim + service + web on http://127.0.0.1:8080
+pip install -e sim
+SIM_RATE=20 sim/run_sitl.sh
+
 # Tests
 python -m unittest discover -s tests
+python -m unittest discover -s sim/tests
 
 # LSTM experiment, outside the package (needs model/lstm/requirements.txt)
 python3 -m model.lstm.train_lstm
@@ -138,6 +146,23 @@ work around them a second time downstream.
   confirmed. Don't guess its meaning in code or in write-ups.
 - **Missing values are `None`.** In resampled output, a missing bucket is a gap, not a
   zero.
+
+## ArduPilot / SITL facts (learned the hard way)
+
+- The `radarku/ardupilot-sitl` image is ArduPilot 4.0.3 (amd64, emulated on Apple
+  silicon). It has **no JSON external-physics backend**, so the boat physics are
+  SITL's own `sailboat-motor` model.
+- That model applies `SIM_TIDE_SPEED` / `SIM_TIDE_DIR` (direction it comes **from**)
+  **only while armed**. Wind only acts on the sail, so `scout-sim` folds hull
+  leeway into the tide vector and sets `SIM_WIND_SPD 0`.
+- Mission items must use `MAV_FRAME_GLOBAL_RELATIVE_ALT` (3) even in
+  `MISSION_ITEM_INT`; 4.0 rejects frame 6 with code 2. The fake rover in `tests/`
+  enforces this.
+- Stock Rover mode 17 is only `ROVER_MODE_ENUM_END`, so Scout's MODE_17 is a
+  SentryOS mode. The service only commands AUTO, HOLD and LOITER.
+- Right after arming, SITL briefly reports "EKF variance / EKF failsafe" and may
+  reject one mode change; it clears within seconds and the service retries.
+- Message intervals are per MAVLink link: each client requests its own streams.
 
 ## Working conventions
 

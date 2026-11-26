@@ -43,9 +43,9 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
+from .. import clock
 from .. import energy as E
 from ..data import load_dotenv
 from . import mavlink as M
@@ -72,6 +72,7 @@ STREAMS_HZ = {
 @dataclass
 class Settings:
     mavlink: str = "tcp:127.0.0.1:5760"
+    power_link: str | None = None  # separate source of BATTERY_STATUS, if any
     state_dir: Path = Path("lowpower-state")
     mission: Path | None = None
     params: Path | None = None
@@ -225,6 +226,9 @@ class Service:
     def __init__(self, st: Settings, params: E.Params, cfg: P.Config | None = None):
         self.st, self.params, self.cfg = st, params, cfg or P.Config()
         self.link = M.Connection(st.mavlink, sysid=st.sysid)
+        self.power = (
+            M.Connection(st.power_link, sysid=st.sysid) if st.power_link else None
+        )
         self.tel = Telemetry(st)
         self.ap = Autopilot()
         self.mission: Mission | None = None
@@ -243,6 +247,7 @@ class Service:
         self.mode_cmd_at = -1e9  # when we last commanded a mode change
         self.mode_cmd_want = None  # that mode, until a heartbeat confirms it
         self.link_opens = 0
+        self.retry_resync_at = 0.0
         self.last = {}  # rate limiting: name -> monotonic time
         self.stop = False
         self.state_path = st.state_dir / "state.json"
@@ -313,12 +318,19 @@ class Service:
             hist = self.st.state_dir / "history.jsonl"
             if hist.exists() and hist.stat().st_size > 5_000_000:
                 os.replace(hist, hist.with_suffix(".jsonl.1"))
+            mono = time.monotonic()
+            load = self.tel.mean(self.tel.load, 300, mono)
+            solar = self.tel.mean(self.tel.solar, 300, mono)
             with open(hist, "a") as fh:
                 fh.write(
                     json.dumps(
                         {
                             "time": s.time.isoformat(),
                             "battery_pct": round(s.battery_pct, 2),
+                            "load_w": None if load is None else round(load, 1),
+                            "solar_w": None if solar is None else round(solar, 1),
+                            "sog": self.tel.sog,
+                            "mode": M.ROVER_MODES.get(self.ap.mode, self.ap.mode),
                             "action": self.plan.action,
                             "speed_ms": self.plan.speed_ms,
                             "min_pct": self.plan.min_pct,
@@ -337,21 +349,28 @@ class Service:
                 signal.SIGHUP, lambda *_: setattr(self, "mission_mtime", None)
             )
         log.info(
-            "starting: mavlink=%s state=%s mission=%s dry_run=%s",
+            "starting: mavlink=%s power=%s state=%s mission=%s dry_run=%s clock=%s",
             self.st.mavlink,
+            self.st.power_link,
             self.st.state_dir,
             self.st.mission_path,
             self.st.dry_run,
+            _now().isoformat(timespec="seconds"),
         )
         sd_notify("READY=1")
         while not self.stop:
             now = time.monotonic()
-            for msg in self.link.poll(0.5):
+            for msg in self.link.poll(0.4 if self.power else 0.5):
                 self._on_message(msg, now)
+            if self.power:
+                for msg in self.power.poll(0.05):
+                    self.tel.update(msg, time.monotonic())
             self._tick(time.monotonic())
             sd_notify("WATCHDOG=1")
         self._save_state()
         self.link.close("(service stopping)")
+        if self.power:
+            self.power.close("(service stopping)")
         log.info("stopped")
         return 0
 
@@ -412,7 +431,12 @@ class Service:
                 self.was_armed = (
                     self.ap.armed
                 )  # follows the operator; frozen just after a restart
-        if self.ap.online and self.need_resync and self.ap.mode != M.MODE_INITIALISING:
+        if (
+            self.ap.online
+            and self.need_resync
+            and self.ap.mode != M.MODE_INITIALISING
+            and now >= self.retry_resync_at
+        ):
             self._resync(now)
         if self._every("observe", 60.0, now):
             self._observe(now)
@@ -473,6 +497,10 @@ class Service:
                 )
                 if self._upload_mission(items):
                     self.uploaded = _signature(items)
+                else:
+                    log.error("mission upload failed; retrying in 30 s")
+                    self.retry_resync_at = now + 30
+                    return
             else:
                 self.uploaded = onboard
             restarted = (
@@ -568,7 +596,7 @@ class Service:
                     "MISSION_ITEM_INT",
                     seq=seq,
                     command=cmd,
-                    frame=M.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+                    frame=M.MAV_FRAME_GLOBAL_RELATIVE_ALT,
                     x=int(round(la * 1e7)),
                     y=int(round(lo * 1e7)),
                     z=0.0,
@@ -608,8 +636,8 @@ class Service:
         solar = t.mean(t.solar, 900, now)
         if solar is not None:
             clear = E.clear_sky_w(self.params, _now(), t.lat, t.lon)
-            self.cloud_obs.append([time.time(), solar, clear])
-        cutoff = time.time() - 86400
+            self.cloud_obs.append([_now().timestamp(), solar, clear])
+        cutoff = _now().timestamp() - 86400
         self.cloud_obs = [o for o in self.cloud_obs if o[0] >= cutoff]
         pl = self.plan
         if (
@@ -785,7 +813,7 @@ def _signature(items):
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return clock.now()  # real UTC unless $SCOUT_CLOCK sets a simulated clock
 
 
 # ---------------------------------------------------------------------- CLI
@@ -799,6 +827,9 @@ def _settings(a) -> Settings:
     st = Settings(state_dir=Path(state.split(":")[0]))
     st.mavlink = (
         getattr(a, "mavlink", None) or os.environ.get("SCOUT_MAVLINK") or st.mavlink
+    )
+    st.power_link = (
+        getattr(a, "power_link", None) or os.environ.get("SCOUT_POWER_LINK") or None
     )
     mission = getattr(a, "mission", None) or os.environ.get("SCOUT_MISSION")
     st.mission = Path(mission) if mission else None
@@ -841,6 +872,11 @@ def main(argv=None) -> int:
     r.add_argument(
         "--mavlink",
         help="tcp:HOST:PORT | udpin:HOST:PORT | udpout:HOST:PORT | serial:DEV:BAUD",
+    )
+    r.add_argument(
+        "--power-link",
+        help="separate BATTERY_STATUS source, e.g. udpin:0.0.0.0:14601 "
+        "(default $SCOUT_POWER_LINK)",
     )
     r.add_argument(
         "--params", help="params.json from scout-evaluate (default $SCOUT_PARAMS)"

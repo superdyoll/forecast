@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scout · forecast vs actual</title>
+<style>
+/* Reference data-viz palette; every role swaps in one place for dark mode. */
+.viz-root {
+  color-scheme: light;
+  --page: #f9f9f9; --surface-1: #ffffff;
+  --text-primary: #191919; --text-secondary: #666666;
+  --grid: #e7e7e7; --axis: #c2c2c2; --ring: rgba(11,11,11,0.10);
+  --series-1: #257de0; --series-2: #f47230; --series-3: #00b894; --series-4: #f2a600;
+  --good: #0aac23; --warning: #fbb315; --critical: #dc3c3d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --page: #0b0b0b; --surface-1: #191919;
+    --text-primary: #efefef; --text-secondary: #9c9c9c;
+    --grid: #303030; --axis: #474747; --ring: rgba(255,255,255,0.10);
+    --series-1: #338ced; --series-2: #e76624; --series-3: #00a888; --series-4: #d28e05;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --page: #0b0b0b; --surface-1: #191919;
+  --text-primary: #efefef; --text-secondary: #9c9c9c;
+  --grid: #303030; --axis: #474747; --ring: rgba(255,255,255,0.10);
+  --series-1: #338ced; --series-2: #e76624; --series-3: #00a888; --series-4: #d28e05;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.viz-root {
+  min-height: 100vh; background: var(--page); color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 24px;
+}
+main { max-width: 1080px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 20px; margin: 0; font-weight: 600; }
+h2 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
+.sub { color: var(--text-secondary); font-size: 13px; }
+.card { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.tile .label { color: var(--text-secondary); font-size: 12px; }
+.tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
+.tile .note { color: var(--text-secondary); font-size: 12px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+ul.reasons { margin: 8px 0 0; padding-left: 18px; }
+.controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 8px 0; color: var(--text-secondary); font-size: 13px; }
+select, input, button { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--axis); border-radius: 6px; padding: 4px 8px; }
+button { cursor: pointer; }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin-top: 4px; flex-wrap: wrap; }
+.key { display: inline-block; width: 16px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 6px; }
+.key.dashed { border-top-style: dashed; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .dlabel { font-size: 12px; fill: var(--text-primary); }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--ring); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.12); display: none; min-width: 150px; z-index: 2; }
+.tip .t { color: var(--text-secondary); margin-bottom: 4px; }
+.tip .row { display: flex; align-items: center; gap: 6px; }
+.tip strong { font-weight: 600; min-width: 46px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--text-secondary); font-weight: 500; font-size: 12px; }
+details { margin-top: 8px; color: var(--text-secondary); font-size: 13px; }
+details table { margin-top: 6px; color: var(--text-primary); }
+.scroll { max-height: 260px; overflow: auto; }
+.empty { color: var(--text-secondary); padding: 24px 0; text-align: center; }
+.warn { color: var(--critical); }
+</style>
+</head>
+<body>
+<div class="viz-root">
+<main>
+  <header>
+    <h1>Scout · low-power mode</h1>
+    <span class="sub" id="updated">loading…</span>
+    <span class="badge" id="ap"></span>
+    <span style="flex:1"></span>
+    <select id="theme" aria-label="Theme"><option value="">System theme</option><option value="light">Light</option><option value="dark">Dark</option></select>
+  </header>
+
+  <section class="tiles" id="tiles"></section>
+
+  <section class="card">
+    <h2>Why</h2>
+    <div class="sub" id="plan-sub"></div>
+    <ul class="reasons" id="reasons"></ul>
+  </section>
+
+  <section class="card">
+    <h2>Battery: forecast against what happened</h2>
+    <div class="sub">Battery % as Tether shows it. Solid: readings. Dashed: a forecast the service made earlier, so the gap is its error.</div>
+    <div class="controls">
+      <label>Forecast made <select id="made"></select></label>
+      <label>Show last <select id="hours"><option>12</option><option>24</option><option selected>48</option><option>96</option></select> h</label>
+    </div>
+    <div class="chart" id="battery-chart"></div>
+    <details><summary>Table view</summary><div class="scroll" id="battery-table"></div></details>
+  </section>
+
+  <section class="card">
+    <h2>Forecast error by lead time</h2>
+    <div class="sub">Every past forecast scored against the readings that followed (battery-% points). "Stays the same" is the naive baseline to beat.</div>
+    <div id="errors"></div>
+  </section>
+
+  <section class="card">
+    <h2>Power: load and solar</h2>
+    <div class="sub">Five-minute means at each decision (W).</div>
+    <div class="chart" id="power-chart"></div>
+    <details><summary>Table view</summary><div class="scroll" id="power-table"></div></details>
+  </section>
+
+  <section class="card" id="hindcast-card" hidden>
+    <h2>Forecast a past period from telemetry</h2>
+    <div class="sub" id="hc-range"></div>
+    <div class="controls">
+      <label>From (UTC) <input id="hc-from" type="datetime-local" step="900"></label>
+      <label>Hours <input id="hc-hours" type="number" min="1" max="96" value="24" style="width:70px"></label>
+      <label>Plan <select id="hc-plan"><option value="actual">known load (as the mode plans)</option><option value="persist">blind (hold last 6 h load)</option></select></label>
+      <button id="hc-go">Forecast</button>
+    </div>
+    <div class="sub" id="hc-summary"></div>
+    <div class="chart" id="hc-chart"></div>
+    <details><summary>Table view</summary><div class="scroll" id="hc-table"></div></details>
+  </section>
+</main>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const fmtTime = (d) => d.toISOString().slice(5, 16).replace("T", " ");
+const fmt = (v, dp = 1) => (v == null || Number.isNaN(v) ? "–" : Number(v).toFixed(dp));
+const el = (tag, attrs = {}, text) => {
+  const ns = ["svg","line","path","text","rect","circle","g"].includes(tag) ? "http://www.w3.org/2000/svg" : null;
+  const n = ns ? document.createElementNS(ns, tag) : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (text != null) n.textContent = text;  // never innerHTML with data
+  return n;
+};
+
+// Theme toggle wins over the OS setting both ways.
+$("theme").value = localStorage.getItem("theme") || "";
+const applyTheme = () => { const v = $("theme").value; if (v) document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme; localStorage.setItem("theme", v); };
+$("theme").onchange = applyTheme; applyTheme();
+
+function niceTicks(lo, hi, n = 5) {
+  const span = hi - lo || 1, step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= step0);
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+
+/* Line chart: one y-axis, solid hairline grid, 2px lines, crosshair tooltip
+   listing every series at the hovered time, legend + direct end labels. */
+function lineChart(host, { series, yLabel, yMin, yMax, refs = [], nowT = null, unit = "" }) {
+  host.replaceChildren();
+  const pts = series.flatMap((s) => s.points);
+  if (!pts.length) { host.append(el("div", { class: "empty" }, "No data yet.")); return; }
+  const W = 1000, H = 300, m = { l: 44, r: 96, t: 12, b: 28 };
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]).concat(refs.map((r) => r.y));
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let lo = yMin ?? Math.min(...ys), hi = yMax ?? Math.max(...ys);
+  if (yMin == null) lo = Math.floor(lo - 2); if (yMax == null) hi = Math.ceil(hi + 2);
+  const X = (t) => m.l + ((t - x0) / (x1 - x0 || 1)) * (W - m.l - m.r);
+  const Y = (v) => H - m.b - ((v - lo) / (hi - lo || 1)) * (H - m.t - m.b);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${yLabel} over time` });
+  for (const v of niceTicks(lo, hi)) {
+    svg.append(el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)", "stroke-width": 1 }));
+    svg.append(el("text", { x: m.l - 6, y: Y(v) + 4, "text-anchor": "end" }, `${v}${unit}`));
+  }
+  svg.append(el("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1 }));
+  const spanH = (x1 - x0) / 3.6e6, stepH = [1, 2, 3, 6, 12, 24, 48].find((s) => spanH / s <= 8) || 96;
+  for (let t = Math.ceil(x0 / (stepH * 3.6e6)) * stepH * 3.6e6; t <= x1; t += stepH * 3.6e6)
+    svg.append(el("text", { x: X(t), y: H - 8, "text-anchor": "middle" }, fmtTime(new Date(t))));
+  for (const r of refs) {
+    svg.append(el("line", { x1: m.l, x2: W - m.r, y1: Y(r.y), y2: Y(r.y), stroke: "var(--critical)", "stroke-width": 1 }));
+    svg.append(el("text", { x: W - m.r + 6, y: Y(r.y) + 4 }, r.label));
+  }
+  if (nowT && nowT > x0 && nowT < x1) {
+    svg.append(el("line", { x1: X(nowT), x2: X(nowT), y1: m.t, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1 }));
+    svg.append(el("text", { x: X(nowT) + 4, y: m.t + 10 }, "now"));
+  }
+  for (const s of series) {
+    if (!s.points.length) continue;
+    const d = s.points.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
+    svg.append(el("path", { d, fill: "none", stroke: `var(${s.color})`, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round", ...(s.dashed ? { "stroke-dasharray": "6 4" } : {}) }));
+    const last = s.points[s.points.length - 1];
+    svg.append(el("text", { class: "dlabel", x: X(last[0]) + 6, y: Y(last[1]) + 4 }, s.name));
+  }
+  const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" });
+  svg.append(cross);
+  const dots = series.map((s) => { const c = el("circle", { r: 4, fill: `var(${s.color})`, stroke: "var(--surface-1)", "stroke-width": 2, visibility: "hidden" }); svg.append(c); return c; });
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" });
+  svg.append(hit);
+  host.append(svg);
+  const legend = el("div", { class: "legend" });
+  for (const s of series) { const k = el("span"); k.append(el("span", { class: "key" + (s.dashed ? " dashed" : ""), style: `border-color: var(${s.color})` }), document.createTextNode(s.name)); legend.append(k); }
+  host.append(legend);
+  const tip = el("div", { class: "tip" }); host.append(tip);
+  const nearest = (s, t) => { let best = null; for (const p of s.points) if (!best || Math.abs(p[0] - t) < Math.abs(best[0] - t)) best = p; return best && Math.abs(best[0] - t) <= 45 * 60e3 ? best : null; };
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect(), sx = ((ev.clientX - r.left) / r.width) * W;
+    const t = x0 + ((sx - m.l) / (W - m.l - m.r)) * (x1 - x0);
+    cross.setAttribute("x1", X(t)); cross.setAttribute("x2", X(t)); cross.setAttribute("visibility", "visible");
+    tip.replaceChildren(el("div", { class: "t" }, fmtTime(new Date(t)) + " UTC"));
+    series.forEach((s, i) => {
+      const p = nearest(s, t);
+      if (!p) { dots[i].setAttribute("visibility", "hidden"); return; }
+      dots[i].setAttribute("cx", X(p[0])); dots[i].setAttribute("cy", Y(p[1])); dots[i].setAttribute("visibility", "visible");
+      const row = el("div", { class: "row" });
+      row.append(el("span", { class: "key" + (s.dashed ? " dashed" : ""), style: `border-color: var(${s.color})` }), el("strong", {}, fmt(p[1]) + unit), document.createTextNode(s.name));
+      tip.append(row);
+    });
+    tip.style.display = "block";
+    const px = ((X(t)) / W) * r.width;
+    tip.style.left = Math.min(px + 12, r.width - tip.offsetWidth - 4) + "px"; tip.style.top = "8px";
+  };
+  const leave = () => { cross.setAttribute("visibility", "hidden"); dots.forEach((d) => d.setAttribute("visibility", "hidden")); tip.style.display = "none"; };
+  hit.addEventListener("pointermove", move); hit.addEventListener("pointerleave", leave);
+}
+
+function table(host, headers, rows) {
+  const t = el("table"), tr = el("tr");
+  headers.forEach((h) => tr.append(el("th", {}, h))); t.append(tr);
+  rows.forEach((r) => { const row = el("tr"); r.forEach((c) => row.append(el("td", {}, c))); t.append(row); });
+  host.replaceChildren(t);
+}
+
+const T = (iso) => Date.parse(iso);
+let LIVE = null;
+
+function renderLive() {
+  const d = LIVE, dec = d.decision, plan = dec && dec.plan;
+  $("updated").textContent = dec ? `updated ${fmtTime(new Date(dec.updated))} UTC (boat clock)` : "no decision yet";
+  const ap = $("ap"); ap.replaceChildren();
+  if (dec) {
+    const ok = dec.autopilot.online;
+    ap.append(el("span", { class: "dot", style: `background: var(${ok ? "--good" : "--critical"})` }),
+      document.createTextNode(`autopilot ${ok ? "online" : "offline"} · ${dec.autopilot.mode ?? "?"}${dec.autopilot.armed ? " · armed" : ""}${dec.override ? " · operator override" : ""}`));
+  }
+  const tiles = $("tiles"); tiles.replaceChildren();
+  const tile = (label, value, note, warn) => { const t = el("div", { class: "card tile" }); t.append(el("div", { class: "label" }, label), el("div", { class: "value" + (warn ? " warn" : "") }, value), el("div", { class: "note" }, note || "")); tiles.append(t); };
+  const st = dec && dec.state, mission = dec && dec.mission;
+  tile("Battery now", st ? fmt(st.battery_pct) + "%" : "–", st ? `${fmt(st.volt, 2)} V · reserve ${fmt(mission?.min_reserve_pct, 0)}%` : "");
+  tile("Plan", plan ? plan.action + (plan.speed_ms ? ` ${fmt(plan.speed_ms)} m/s` : "") : "–", plan ? `Starlink duty ${Math.round(plan.starlink_duty * 100)}%${plan.returning ? " · returning" : ""}` : "", plan && !plan.feasible);
+  tile("Forecast low", plan ? fmt(plan.min_pct) + "%" : "–", plan ? (plan.feasible ? "stays above reserve + margin" : "reserve at risk") : "", plan && !plan.feasible);
+  tile(mission?.kind === "station" ? "Holding" : "Arrival", plan?.eta ? fmtTime(new Date(plan.eta)) : (mission?.kind === "station" ? "on station" : "–"), mission?.arrive_by ? `deadline ${fmtTime(new Date(mission.arrive_by))}` : (mission ? `${mission.kind} mission ${dec.mission_id}` : ""));
+  $("plan-sub").textContent = plan ? `Decided ${fmtTime(new Date(plan.decided_at))} UTC` : "";
+  $("reasons").replaceChildren(...(plan?.reasons || ["Waiting for telemetry and a mission."]).map((r) => el("li", {}, r)));
+
+  // Forecast selector: latest, or one made N hours ago.
+  const sel = $("made"), prev = sel.value;
+  sel.replaceChildren(...d.forecasts.slice().reverse().map((f, i) => el("option", { value: f.made }, (i === 0 ? "latest: " : "") + fmtTime(new Date(f.made)))));
+  if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  drawBattery(); drawPower(); drawErrors();
+}
+
+function drawBattery() {
+  const d = LIVE, f = d.forecasts.find((x) => x.made === $("made").value) || d.forecasts[d.forecasts.length - 1];
+  const actual = d.history.map((r) => [T(r.time), r.battery_pct]);
+  const fc = f ? [[T(f.made), f.battery_pct], ...f.points.map((p) => [T(p[0]), p[1]])] : [];
+  const reserve = d.decision?.mission?.min_reserve_pct;
+  lineChart($("battery-chart"), {
+    series: [{ name: "Actual", color: "--series-1", points: actual }, { name: "Forecast", color: "--series-2", dashed: true, points: fc }],
+    yLabel: "Battery %", unit: "%", refs: reserve != null ? [{ y: reserve, label: `reserve ${reserve}%` }] : [],
+    nowT: actual.length ? actual[actual.length - 1][0] : null,
+  });
+  const byT = new Map(actual.map((p) => [p[0], p[1]]));
+  table($("battery-table"), ["Time (UTC)", "Forecast %", "Actual %"], fc.map((p) => [fmtTime(new Date(p[0])), fmt(p[1]), fmt(byT.get(p[0]))]));
+}
+
+function drawPower() {
+  const h = LIVE.history;
+  const load = h.filter((r) => r.load_w != null).map((r) => [T(r.time), r.load_w]);
+  const solar = h.filter((r) => r.solar_w != null).map((r) => [T(r.time), r.solar_w]);
+  lineChart($("power-chart"), { series: [{ name: "Load", color: "--series-3", points: load }, { name: "Solar", color: "--series-4", points: solar }], yLabel: "Power", unit: " W", yMin: 0 });
+  table($("power-table"), ["Time (UTC)", "Load W", "Solar W", "Speed m/s", "Mode", "Plan"], h.slice().reverse().map((r) => [fmtTime(new Date(r.time)), fmt(r.load_w, 0), fmt(r.solar_w, 0), fmt(r.sog, 2), r.mode ?? "–", r.action + (r.speed_ms ? ` ${r.speed_ms}` : "")]));
+}
+
+function drawErrors() {
+  const e = LIVE.errors, rows = Object.entries(e).filter(([, v]) => v.n);
+  if (!rows.length) { $("errors").replaceChildren(el("div", { class: "empty" }, "Not enough history to score forecasts yet (needs readings at least 1 h after a forecast).")); return; }
+  table($("errors"), ["Lead time", "Forecast MAE", "Stays-the-same MAE", "Bias (+ = optimistic)", "Forecasts scored"],
+    rows.map(([k, v]) => [k, fmt(v.mae, 2), fmt(v.mae_persistence, 2), (v.bias > 0 ? "+" : "") + fmt(v.bias, 2), String(v.n)]));
+}
+
+async function refresh() {
+  try {
+    const r = await fetch(`/api/live?hours=${$("hours").value}`);
+    LIVE = await r.json(); renderLive();
+  } catch (err) { $("updated").textContent = "server unreachable: " + err; }
+}
+$("made").onchange = drawBattery; $("hours").onchange = refresh;
+
+// Hindcast from telemetry (only when the server has a CSV).
+async function setupHindcast() {
+  const c = await (await fetch("/api/config")).json();
+  if (!c.hindcast) return;
+  $("hindcast-card").hidden = false;
+  $("hc-range").textContent = `Telemetry covers ${fmtTime(new Date(c.data_from))} to ${fmtTime(new Date(c.data_to))} UTC. The model is refitted with the chosen window held out, so it never sees what it forecasts.`;
+  $("hc-from").value = new Date(Date.parse(c.data_from) + 9 * 864e5).toISOString().slice(0, 13) + ":00";
+  $("hc-go").onclick = async () => {
+    $("hc-summary").textContent = "fitting and forecasting…";
+    const q = new URLSearchParams({ from: $("hc-from").value + "Z", hours: $("hc-hours").value, plan: $("hc-plan").value });
+    const r = await (await fetch("/api/hindcast?" + q)).json();
+    if (r.error) { $("hc-summary").textContent = r.error; $("hc-chart").replaceChildren(); return; }
+    const s = r.summary;
+    $("hc-summary").textContent = s.n ? `Error ${fmt(s.mae, 2)} points (battery stays the same: ${fmt(s.mae_persistence, 2)}) over ${s.n} steps · ${r.fitted}${r.note ? " · " + r.note : ""}` : "No actual readings in this window to compare with.";
+    const start = [T(r.start), r.start_pct];
+    lineChart($("hc-chart"), {
+      series: [{ name: "Actual", color: "--series-1", points: [start, ...r.steps.filter((x) => x.actual_pct != null).map((x) => [T(x.time), x.actual_pct])] },
+               { name: "Forecast", color: "--series-2", dashed: true, points: [start, ...r.steps.map((x) => [T(x.time), x.forecast_pct])] }],
+      yLabel: "Battery %", unit: "%",
+    });
+    table($("hc-table"), ["Time (UTC)", "Forecast %", "Actual %", "Solar W", "Load W"], r.steps.map((x) => [fmtTime(new Date(x.time)), fmt(x.forecast_pct), fmt(x.actual_pct), fmt(x.solar_w, 0), fmt(x.load_w, 0)]));
+  };
+}
+
+refresh(); setInterval(refresh, 30000); setupHindcast();
+</script>
+</body>
+</html>

@@ -163,6 +163,12 @@ class FakeRover:
                 "MISSION_REQUEST_INT", seq=0, target_system=255, target_component=191
             )
         elif n == "MISSION_ITEM_INT" and self._upload:
+            if m["frame"] not in (0, 3):  # like ArduPilot 4.0: no *_INT frames
+                self._upload = None
+                self.send(
+                    "MISSION_ACK", type=2, target_system=255, target_component=191
+                )
+                return
             count, items = self._upload
             if m["seq"] == len(items):
                 items.append((m["command"], m["x"] / 1e7, m["y"] / 1e7, m["param3"]))

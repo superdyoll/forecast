@@ -42,11 +42,37 @@ power relay. Decisions, reasons and forecasts go to the log (journald) and to
 Settings: flags, else `SCOUT_MAVLINK`, `SCOUT_STATE_DIR` (or systemd's
 `$STATE_DIRECTORY`), `SCOUT_MISSION`, `SCOUT_PARAMS`, also read from `.env`.
 
+## Simulation (ArduPilot SITL) and web page
+
+```sh
+pip install -e . -e sim                 # sim/ is a separate package, never on the boat
+sim/run_sitl.sh                         # SITL in docker + scout-sim + scout-lowpower + scout-web
+SIM_RATE=20 sim/run_sitl.sh             # 20x clock: ~4 simulated hours in 12 minutes
+open http://127.0.0.1:8080
+```
+
+* **SITL**: the `radarku/ardupilot-sitl` image (ArduPilot 4.0, Rover,
+  `sailboat-motor` boat model), started with `sim/sitl/scout.parm`.
+* **scout-sim** (`sim/`): current (mean + M2 tidal ellipse), wind (gusty,
+  hours-long weather) with hull leeway, and cloud are pushed into SITL as the
+  `SIM_TIDE` drift vector, so ArduPilot's own controllers fight them. Its power
+  model turns speed *through the water* into thruster load, adds hotel and
+  Starlink, computes solar from sun position and cloud, runs the battery, and
+  sends `BATTERY_STATUS` (battery, load, solar) to the service's power link.
+  Its "true" parameters are ~10 % off the fitted ones on purpose.
+* A shared clock (`SCOUT_CLOCK`, from `scout-sim clock`) lets the service and
+  the simulator agree on a simulated July date and rate.
+* **scout-web**: stdlib server, no external assets (works offline on the
+  boat). Shows the current decision and why, battery readings against any
+  earlier forecast, forecast error by lead time against "stays the same",
+  load and solar, and forecasts of historical periods from the telemetry CSV.
+
 ## Tests
 
 ```sh
 pip install -e .
 python -m unittest discover -s tests
+python -m unittest discover -s sim/tests     # with sim installed
 ```
 
 See `REPORT.md` for findings and accuracy, and `AGENTS.md` for project conventions.

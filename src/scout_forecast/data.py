@@ -365,6 +365,7 @@ def summary(rows: list[dict]) -> str:
 
 CSV_ENV = "SCOUT_TELEMETRY_CSV"
 _dotenv_dir: Path | None = None  # directory of the .env that was loaded
+_dotenv_keys: set = set()  # variables that came from .env, not the shell
 
 
 def find_dotenv() -> Path | None:
@@ -399,9 +400,25 @@ def load_dotenv(path: str | Path | None = None) -> Path | None:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
             value = value[1:-1]
-        os.environ.setdefault(key, value)
+        if key not in os.environ:
+            os.environ[key] = value
+            _dotenv_keys.add(key)
     _dotenv_dir = f.parent.resolve()
     return f
+
+
+def csv_default() -> str | None:
+    """$SCOUT_TELEMETRY_CSV from the shell or .env, or None. Never a built-in path.
+
+    A relative path from .env is relative to the .env file; one from the
+    shell is relative to the current directory.
+    """
+    if _dotenv_dir is None:
+        load_dotenv()
+    v = os.environ.get(CSV_ENV)
+    if v and CSV_ENV in _dotenv_keys and _dotenv_dir and not Path(v).is_absolute():
+        v = str(_dotenv_dir / v)
+    return v or None
 
 
 def csv_arg(ap: argparse.ArgumentParser) -> None:
@@ -410,11 +427,7 @@ def csv_arg(ap: argparse.ArgumentParser) -> None:
     There is no built-in path. A relative path in .env is taken relative to
     the .env file; one from the shell is relative to the current directory.
     """
-    from_shell = os.environ.get(CSV_ENV)
-    load_dotenv()
-    default = os.environ.get(CSV_ENV)
-    if default and not from_shell and _dotenv_dir and not Path(default).is_absolute():
-        default = str(_dotenv_dir / default)
+    default = csv_default()
     ap.add_argument(
         "--csv",
         default=default,
