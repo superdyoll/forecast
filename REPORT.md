@@ -1,8 +1,9 @@
 # Scout energy forecast: what we've learned so far
 
 Status as of 2026-11-26. Covers the telemetry analysis, the cleaning pipeline
-(`scout_data.py`), an LSTM experiment (`model/lstm/`) and the physical
-energy-balance model that replaces it (`model/physical/`, run with `./forecast`).
+and the physical energy-balance model (both in the `scout-forecast` package,
+`src/scout_forecast/`, run with `forecast`), plus an LSTM experiment kept
+separately in `model/lstm/`.
 All numbers come from `scout_telemetry_2025-07.csv` (17 days, 24,674 messages).
 
 ## Summary
@@ -164,7 +165,7 @@ there is a usable day/night signal for a better model to pick up.
 
 ## Physical energy-balance model
 
-`model/physical/energy.py` uses the standard library only, so it can run on the boat.
+`scout_forecast/energy.py` uses the standard library only, so it can run on the boat.
 It simulates the battery on a 15-minute grid:
 
 - **Load:** the recorded load-channel value when the operating plan is known (the
@@ -185,7 +186,7 @@ It simulates the battery on a 15-minute grid:
 ### Results (17 days, 5 folds, 12-hour horizon)
 
 The model is checked on exactly the same blocked, purged folds and 1,458 windows as the
-LSTM (`python3 -m model.physical.evaluate`, run `20261126T194630Z`). Every parameter
+LSTM (`scout-evaluate`, run `20261126T194630Z`). Every parameter
 is refitted on each fold's training data.
 
 **Mean error over folds (battery-% points; lower is better):**
@@ -295,14 +296,14 @@ speed above about 0.7 m/s coming from current rather than thrust. The low-power 
 ```sh
 # From the repo root. The CSV is never built in: pass --csv or set the variable.
 cp .env.example .env   # then set SCOUT_TELEMETRY_CSV (a shell export overrides it)
-python3 scout_data.py --summary
-./forecast --from 2025-07-23T00:00Z --hours 24          # physical model, stdlib only
-python3 -m model.physical.evaluate                       # k-fold; writes ./runs/physical/<timestamp>/
+pip install .                                            # scout-forecast package: stdlib only
+scout-data --summary
+forecast --from 2025-07-23T00:00Z --hours 24            # physical model
+scout-evaluate                                           # k-fold; writes ./runs/physical/<timestamp>/
 pip install -r model/lstm/requirements.txt
 python3 -m model.lstm.train_lstm                         # writes ./runs/lstm/<timestamp>/
-python3 -m model.physical.evaluate --lstm-results runs/lstm/<timestamp>/results.json
 ```
 
 The runs reported here are LSTM `20261126T192216Z` and physical `20261126T194630Z`
-(default settings). They were written under `model/*/runs/` by earlier versions of the
-scripts.
+(default settings), in `model/lstm/runs/` and `runs/physical/`. Earlier script
+versions wrote both under `model/*/runs/`; the physical run has since moved.

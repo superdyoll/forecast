@@ -1,15 +1,15 @@
-#!/usr/bin/env python3
 """Extract and clean Scout telemetry exported from Tether.
 
-Standard library only, so the same code can run on the boat's computer.
+Part of the scout-forecast package. Standard library only, so the same code
+can run on the boat's computer.
 
 Usage:
-    python3 scout_data.py --csv telemetry.csv -o data/clean.csv
-    python3 scout_data.py --csv telemetry.csv -o data/5min.csv --resample 300
-    python3 scout_data.py --csv telemetry.csv --summary
+    scout-data --csv telemetry.csv -o data/clean.csv
+    scout-data --csv telemetry.csv -o data/5min.csv --resample 300
+    scout-data --csv telemetry.csv --summary
 
 As a library:
-    from scout_data import load, resample
+    from scout_forecast.data import load, resample
     rows = load("telemetry.csv")
 
 Cleaning rules (each from inspecting the raw file; see DATA.md for columns):
@@ -27,6 +27,7 @@ Cleaning rules (each from inspecting the raw file; see DATA.md for columns):
     3.3 m/s) are artefacts of the backlog -> None.
   * Battery current sign: positive = charging, negative = discharging.
 """
+
 from __future__ import annotations
 
 import argparse

@@ -32,9 +32,8 @@ inputs and may not exist in a fresh clone.
 
 | Path | Status |
 | --- | --- |
-| `scout_data.py` | Done. Loads, cleans and resamples the raw Tether CSV export. |
-| `model/lstm/train_lstm.py` | Experimental. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. Needs `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
-| `model/physical/` | Energy-balance model (stdlib only): `energy.py` (grid, fit, simulate), `evaluate.py` (same k-fold as the LSTM), `forecast.py`. Best model so far (3.1 points over 12 h with a known plan). `./forecast` runs it; `python3 -m model.physical.evaluate` checks it, writing to `runs/physical/`. |
+| `src/scout_forecast/` | **The `scout-forecast` package** (wheel, stdlib only, no dependencies). `data.py` (load/clean/resample the Tether CSV), `energy.py` (physical model: grid, fit, simulate), `evaluate.py` (blocked, purged k-fold), `forecast.py`. Commands: `forecast`, `scout-evaluate`, `scout-data`. Best model so far (3.1 points over 12 h with a known plan). |
+| `model/lstm/train_lstm.py` | Experimental. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. Not part of the package: the package must never import or mention it. It depends on the package (`pip install -e .`) plus `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
 | service, SITL sim, web page, systemd units, tests | Not started yet |
 
 Update this table when you add components.
@@ -49,51 +48,55 @@ Update this table when you add components.
   component needs them.
 - The finished system runs on Linux with systemd. **Don't hard-code paths**: no data
   file names, no repo location (`Path(__file__).parents[...]`), no `sys.path` edits.
-  Take inputs via `--csv` / `SCOUT_TELEMETRY_CSV` (`scout_data.csv_arg`, which also
-  reads a gitignored `.env`; shell variables win), write
-  outputs relative to the current directory, and run package code as
-  `python3 -m model.<...>` from the repo root.
+  Take inputs via `--csv` / `SCOUT_TELEMETRY_CSV` (`scout_forecast.data.csv_arg`,
+  which also reads a gitignored `.env`; shell variables win), and write outputs
+  relative to the current directory. Boat-side code goes in the package and is
+  exposed through `[project.scripts]` in `pyproject.toml`.
 
 ## Commands
 
 ```sh
-# Run from the repo root. The CSV path is never built in: pass --csv or set
-# SCOUT_TELEMETRY_CSV. Outputs go under ./runs/ (gitignored).
+# Install the package (editable for development; needs pip >= 21.3)
+pip install -e .
+pip wheel . --no-deps -w dist        # build the wheel for the boat
+
+# The CSV path is never built in: pass --csv or set SCOUT_TELEMETRY_CSV.
+# Outputs go under ./runs/ (gitignored).
 cp .env.example .env   # then set SCOUT_TELEMETRY_CSV (a shell export overrides it)
 
 # Summary of the raw data: links, modes, flags, restarts, value ranges
-python3 scout_data.py --summary
+scout-data --summary
 
 # One cleaned row per message / fixed-interval averages (backlog rows excluded)
-python3 scout_data.py -o data/clean.csv
-python3 scout_data.py -o data/5min.csv --resample 300
+scout-data -o data/clean.csv
+scout-data -o data/5min.csv --resample 300
 
 # Battery forecast (physical model). Fitted with the forecast window held out.
-./forecast --from 2025-07-23T00:00Z --hours 24 [--plan persist] [--json out.json]
+forecast --from 2025-07-23T00:00Z --hours 24 [--plan persist] [--json out.json]
 
 # Cross-validate the physical model; also writes params.json fitted on all data
-python3 -m model.physical.evaluate [--lstm-results runs/lstm/<ts>/results.json]
+scout-evaluate
 
-# LSTM experiment (needs model/lstm/requirements.txt)
+# LSTM experiment, outside the package (needs model/lstm/requirements.txt)
 python3 -m model.lstm.train_lstm
 ```
 
 As a library:
 
 ```python
-from scout_data import load, resample
+from scout_forecast.data import load, resample
 rows = load("scout_telemetry_2025-07.csv")  # list of dicts, sorted by time, UTC datetimes
 buckets = resample(rows, 300)
 ```
 
 ## Data facts to keep in mind
 
-These come from inspecting the raw file. `scout_data.py` already handles them, so don't
+These come from inspecting the raw file. `scout_forecast.data` already handles them, so don't
 work around them a second time downstream.
 
 - **Timestamps are receipt times** (`created_at`), not sample times. The fractional
   part varies in length, so Python 3.9's `fromisoformat` fails on it. Use
-  `scout_data.parse_time`.
+  `scout_forecast.data.parse_time`.
 - **Three links:**
   - `direct` (Starlink) has every field and arrives in bursts at about 1 Hz.
   - `imt` (Iridium) arrives about every 5 minutes. It has no solar readings, no battery

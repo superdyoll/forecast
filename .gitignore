@@ -5,3 +5,6 @@ model/*/runs/
 runs/
 .env
 .venv/
+build/
+dist/
+*.egg-info/

@@ -14,7 +14,7 @@ Data-driven choices (see AGENTS.md "Data facts"):
 * 15-minute grid. Iridium arrives every ~5 min and is the only link after
   07-27, so 15 min always has data; Starlink's ~1 Hz bursts average out.
   The 17-day file gives ~1,630 steps, nearly all gaps <= 1 h.
-* Backlog rows are dropped by scout_data.resample (receipt time != sample
+* Backlog rows are dropped by scout_forecast.data.resample (receipt time != sample
   time). Gaps <= --max-gap-steps are interpolated; windows touching a longer
   gap are skipped, never zero-filled.
 * Solar power is missing whenever only Iridium is up (the last ~3.5 days).
@@ -47,7 +47,7 @@ from pathlib import Path
 
 import numpy as np
 
-from scout_data import csv_arg, load, resample
+from scout_forecast.data import csv_arg, load, resample
 
 FEATURES = [
     "battery_pct",
