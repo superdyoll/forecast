@@ -91,11 +91,18 @@ work around them a second time downstream.
 - **Units and signs:**
   - `temperature_c` arrives in hundredths of a degree; the loader divides by 100.
   - Battery current is positive when charging and negative when discharging.
-  - Solar power is measured at the panel, before the charge controller (MPPT).
-  - Thruster and battery share a bus, so thruster power uses the battery voltage when
-    the thruster voltage is missing.
-  - `other_w` = solar − thruster − battery, which is hotel load plus conversion losses.
-    It can be slightly negative because readings aren't sampled at the same moment.
+  - **The "thruster" channel (`thruster_a`/`thruster_w`) is the whole boat's load**,
+    not just the thruster. At night it equals battery discharge to within 0.07 A. Its
+    idle reading (≈5 W disarmed, ≈9 W armed) is the hotel load. The column names are
+    kept for compatibility. See `REPORT.md`.
+  - **`battery_pct` is 20 × V − 400** (a voltage reading, not stored energy). It sags
+    under load and sticks at 100 % at 25 V. Don't use it as an energy target.
+  - Solar power is V×A on the solar channel. Whether that's before or after the charge
+    controller is unconfirmed; the small `other_w` suggests losses are small.
+  - The load channel shares the battery bus, so load power uses the battery voltage
+    when the thruster voltage is missing.
+  - `other_w` = solar − load − battery: conversion losses plus timing mismatch. It
+    averages ≈2 W and can be slightly negative.
 - **Mode 17** is not a stock ArduPilot Rover mode number. It is labelled `MODE_17` until
   confirmed. Don't guess its meaning in code or in write-ups.
 - **Missing values are `None`.** In resampled output, a missing bucket is a gap, not a
@@ -105,8 +112,8 @@ work around them a second time downstream.
 
 - **Validate on data you didn't fit to.** Split by time, not by random rows, and report
   forecast error only on the held-out window.
-- **Write numbers with their source**, e.g. "hotel ≈ 10 W, from mean battery draw when
-  the thruster is idle and there's no sun". The write-up needs this for every figure.
+- **Write numbers with their source**, e.g. "idle load ≈ 9 W, from the load channel when
+  armed with no thrust and no sun". The write-up needs this for every figure.
 - **Keep the decision logic separate from MAVLink I/O and pure**, so it can be
   unit-tested without SITL.
 - **The service must survive a shore-link outage and an autopilot restart.** Keep state

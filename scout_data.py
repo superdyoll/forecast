@@ -180,14 +180,15 @@ def _clean(raw: dict) -> dict:
         MODE_NAMES.get(r["mode"], str(r["mode"])) if r["mode"] is not None else None
     )
 
-    # Power (W). Thruster and battery share a bus (v1 == v2 in ~93% of
-    # Starlink rows); Iridium sends thruster current but no thruster voltage,
-    # so fall back to battery voltage.
+    # Power (W). Tether labels channel 2 "thruster", but it measures the whole
+    # boat's load (it equals battery discharge at night). It shares the battery
+    # bus (v1 == v2 in ~93% of Starlink rows); Iridium sends its current but
+    # no voltage, so fall back to battery voltage.
     bus_v = r["thruster_v"] or r["battery_v"]
     r["battery_w"] = _mul(r["battery_v"], r["battery_a"])
     r["thruster_w"] = _mul(bus_v, r["thruster_a"])
     r["solar_w"] = _mul(r["solar_v"], r["solar_a"])  # panel side, before MPPT
-    # Everything not accounted for: hotel load + MPPT/conversion losses.
+    # Residual: conversion losses + timing mismatch (~2 W on average).
     if None not in (r["solar_w"], r["thruster_w"], r["battery_w"]):
         r["other_w"] = r["solar_w"] - r["thruster_w"] - r["battery_w"]
     else:
