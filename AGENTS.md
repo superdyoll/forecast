@@ -34,7 +34,9 @@ inputs and may not exist in a fresh clone.
 | --- | --- |
 | `src/scout_forecast/` | **The `scout-forecast` package** (wheel, stdlib only, no dependencies). `data.py` (load/clean/resample the Tether CSV), `energy.py` (physical model: grid, fit, simulate), `evaluate.py` (blocked, purged k-fold), `forecast.py`. Commands: `forecast`, `scout-evaluate`, `scout-data`. Best model so far (3.1 points over 12 h with a known plan). |
 | `model/lstm/train_lstm.py` | Experimental. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. Not part of the package: the package must never import or mention it. It depends on the package (`pip install -e .`) plus `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
-| service, SITL sim, web page, systemd units, tests | Not started yet |
+| `src/scout_forecast/lowpower/` | **Low-power mode service** (stdlib only): `planner.py` (pure decision logic), `mission.py` (operator mission file), `mavlink.py` (MAVLink v2 codec + self-reconnecting tcp/udp/serial links), `service.py` (`scout-lowpower run / set-mission / status / plan`). Survives link loss, autopilot restarts (resync, mission check, re-arm), operator overrides and its own restarts. |
+| `tests/` | `python -m unittest discover -s tests` (with the package installed). Planner decision tests, MAVLink codec tests (byte-for-byte vs pymavlink if installed) and a service recovery test against `tests/fake_autopilot.py` (~20 s). |
+| SITL sim, web page, systemd units | Not started yet |
 
 Update this table when you add components.
 
@@ -76,6 +78,15 @@ forecast --from 2025-07-23T00:00Z --hours 24 [--plan persist] [--json out.json]
 
 # Cross-validate the physical model; also writes params.json fitted on all data
 scout-evaluate
+
+# Low-power mode: set a mission, run the service against ArduPilot
+scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --arrive-by 2025-07-25T12:00Z --reserve 30
+scout-lowpower run --mavlink tcp:127.0.0.1:5760 --params runs/physical/<ts>/params.json
+scout-lowpower status                       # current decision (decision.json)
+scout-lowpower plan --lat 60.2 --lon 2.2 --pct 55   # what-if, no autopilot
+
+# Tests
+python -m unittest discover -s tests
 
 # LSTM experiment, outside the package (needs model/lstm/requirements.txt)
 python3 -m model.lstm.train_lstm

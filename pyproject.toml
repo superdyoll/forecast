@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scout-forecast"
+dynamic = ["version"]
+description = "Energy forecast for the Scout solar-electric USV: telemetry cleaning and a physical energy-balance model"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []  # standard library only, so it runs on the boat
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.scripts]
+forecast = "scout_forecast.forecast:main"
+scout-evaluate = "scout_forecast.evaluate:main"
+scout-data = "scout_forecast.data:main"
+scout-lowpower = "scout_forecast.lowpower.service:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "scout_forecast.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["scout_forecast*"]
