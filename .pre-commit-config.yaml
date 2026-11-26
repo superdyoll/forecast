@@ -1,0 +1,59 @@
+# Install:  pip install "pre-commit<4.4" && pre-commit install
+# Run all:  pre-commit run --all-files
+#
+# Versions are the newest that still run on Python 3.9 (the project target and
+# the system python3). Newer releases of pre-commit, pyupgrade and flake8 need
+# 3.11+, and black 26 needs 3.10+. Don't run `pre-commit autoupdate` blindly:
+# move to a newer Python first.
+minimum_pre_commit_version: "3.0.0"
+default_language_version:
+  python: python3
+
+repos:
+  # Standard file hygiene.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-ast
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+      - id: debug-statements
+
+  # Backstop for .gitignore: block private inputs even if force-added.
+  - repo: local
+    hooks:
+      - id: no-private-inputs
+        name: block private data and brief files
+        language: fail
+        entry: "Private inputs must not be committed (see AGENTS.md):"
+        files: '(\.csv$|(^|/)BRIEF\.md$|(^|/)DATA\.md$)'
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.21.0
+    hooks:
+      - id: pyupgrade
+        args: [--py39-plus]
+
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 25.11.0
+    hooks:
+      - id: black
+        args: [--target-version=py39]
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.3.0
+    hooks:
+      - id: flake8

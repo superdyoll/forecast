@@ -36,20 +36,37 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator
+from collections.abc import Iterable
 
 # ArduPilot Rover mode numbers seen in this file. 17 is not a stock Rover
 # mode; kept as an explicit unknown rather than guessed.
-MODE_NAMES = {0: "MANUAL", 4: "HOLD", 5: "LOITER", 10: "AUTO", 11: "RTL",
-              15: "GUIDED", 16: "INITIALISING", 17: "MODE_17"}
+MODE_NAMES = {
+    0: "MANUAL",
+    4: "HOLD",
+    5: "LOITER",
+    10: "AUTO",
+    11: "RTL",
+    15: "GUIDED",
+    16: "INITIALISING",
+    17: "MODE_17",
+}
 
 FLOAT_COLS = [
-    "latitude_deg", "longitude_deg", "heading_deg", "course_deg", "groundspeed_ms",
-    "wp_latitude_deg", "wp_longitude_deg",
-    "voltage_battery1_v", "current_battery1_a",
-    "voltage_battery2_v", "current_battery2_a",
-    "voltage_battery3_v", "current_battery3_a",
-    "temperature_c", "battery_pct",
+    "latitude_deg",
+    "longitude_deg",
+    "heading_deg",
+    "course_deg",
+    "groundspeed_ms",
+    "wp_latitude_deg",
+    "wp_longitude_deg",
+    "voltage_battery1_v",
+    "current_battery1_a",
+    "voltage_battery2_v",
+    "current_battery2_a",
+    "voltage_battery3_v",
+    "current_battery3_a",
+    "temperature_c",
+    "battery_pct",
 ]
 INT_COLS = ["custom_mode", "custom0_arming", "wp_num"]
 
@@ -58,22 +75,49 @@ MAX_PLAUSIBLE_SPEED_MS = 5.0
 
 # Output column order for the cleaned per-message file.
 OUT_COLS = [
-    "time", "link", "lat", "lon", "heading_deg", "course_deg", "speed_ms",
-    "mode", "mode_name", "armed", "wp_num", "wp_lat", "wp_lon",
-    "battery_v", "battery_a", "thruster_v", "thruster_a", "solar_v", "solar_a",
-    "battery_w", "thruster_w", "solar_w", "other_w",
-    "temperature_c", "battery_pct", "flags",
+    "time",
+    "link",
+    "lat",
+    "lon",
+    "heading_deg",
+    "course_deg",
+    "speed_ms",
+    "mode",
+    "mode_name",
+    "armed",
+    "wp_num",
+    "wp_lat",
+    "wp_lon",
+    "battery_v",
+    "battery_a",
+    "thruster_v",
+    "thruster_a",
+    "solar_v",
+    "solar_a",
+    "battery_w",
+    "thruster_w",
+    "solar_w",
+    "other_w",
+    "temperature_c",
+    "battery_pct",
+    "flags",
 ]
 
 RENAME = {
     "communication_mode": "link",
-    "latitude_deg": "lat", "longitude_deg": "lon",
+    "latitude_deg": "lat",
+    "longitude_deg": "lon",
     "groundspeed_ms": "speed_ms",
-    "custom_mode": "mode", "custom0_arming": "armed",
-    "wp_latitude_deg": "wp_lat", "wp_longitude_deg": "wp_lon",
-    "voltage_battery1_v": "battery_v", "current_battery1_a": "battery_a",
-    "voltage_battery2_v": "thruster_v", "current_battery2_a": "thruster_a",
-    "voltage_battery3_v": "solar_v", "current_battery3_a": "solar_a",
+    "custom_mode": "mode",
+    "custom0_arming": "armed",
+    "wp_latitude_deg": "wp_lat",
+    "wp_longitude_deg": "wp_lon",
+    "voltage_battery1_v": "battery_v",
+    "current_battery1_a": "battery_a",
+    "voltage_battery2_v": "thruster_v",
+    "current_battery2_a": "thruster_a",
+    "voltage_battery3_v": "solar_v",
+    "current_battery3_a": "solar_a",
 }
 
 
@@ -103,9 +147,20 @@ def _clean(raw: dict) -> dict:
     # Restart / placeholder records: position 0,0 and zeroed sensors.
     if r["lat"] == 0 and r["lon"] == 0:
         flags.append("reboot" if r["mode"] == 16 else "zero_record")
-        for k in ("lat", "lon", "heading_deg", "course_deg", "speed_ms",
-                  "wp_lat", "wp_lon", "temperature_c", "battery_a",
-                  "solar_v", "solar_a", "thruster_a"):
+        for k in (
+            "lat",
+            "lon",
+            "heading_deg",
+            "course_deg",
+            "speed_ms",
+            "wp_lat",
+            "wp_lon",
+            "temperature_c",
+            "battery_a",
+            "solar_v",
+            "solar_a",
+            "thruster_a",
+        ):
             r[k] = None
     elif r["mode"] == 16:
         flags.append("reboot")
@@ -121,7 +176,9 @@ def _clean(raw: dict) -> dict:
         r["speed_ms"] = None
         flags.append("bad_speed")
 
-    r["mode_name"] = MODE_NAMES.get(r["mode"], str(r["mode"])) if r["mode"] is not None else None
+    r["mode_name"] = (
+        MODE_NAMES.get(r["mode"], str(r["mode"])) if r["mode"] is not None else None
+    )
 
     # Power (W). Thruster and battery share a bus (v1 == v2 in ~93% of
     # Starlink rows); Iridium sends thruster current but no thruster voltage,
@@ -155,7 +212,10 @@ def load(path: str | Path, include_globalstar: bool = True) -> list[dict]:
     for r in rows:
         if r["link"] != "imt":
             continue
-        if prev_imt is not None and (r["time"] - prev_imt).total_seconds() < IMT_BACKLOG_GAP_S:
+        if (
+            prev_imt is not None
+            and (r["time"] - prev_imt).total_seconds() < IMT_BACKLOG_GAP_S
+        ):
             r["flags"].append("backlog")
         prev_imt = r["time"]
 
@@ -165,17 +225,37 @@ def load(path: str | Path, include_globalstar: bool = True) -> list[dict]:
 
 
 # Fields averaged when resampling. Angles use a circular mean.
-_MEAN_FIELDS = ["lat", "lon", "speed_ms", "battery_v", "battery_a", "thruster_a",
-                "solar_v", "solar_a", "battery_w", "thruster_w", "solar_w",
-                "other_w", "temperature_c", "battery_pct"]
+_MEAN_FIELDS = [
+    "lat",
+    "lon",
+    "speed_ms",
+    "battery_v",
+    "battery_a",
+    "thruster_a",
+    "solar_v",
+    "solar_a",
+    "battery_w",
+    "thruster_w",
+    "solar_w",
+    "other_w",
+    "temperature_c",
+    "battery_pct",
+]
 _ANGLE_FIELDS = ["heading_deg", "course_deg"]
 _LAST_FIELDS = ["mode", "mode_name", "armed", "wp_num", "wp_lat", "wp_lon"]
 
-RESAMPLE_COLS = (["time", "n", "n_direct", "n_imt"] + _MEAN_FIELDS + _ANGLE_FIELDS
-                 + _LAST_FIELDS + ["flags"])
+RESAMPLE_COLS = (
+    ["time", "n", "n_direct", "n_imt"]
+    + _MEAN_FIELDS
+    + _ANGLE_FIELDS
+    + _LAST_FIELDS
+    + ["flags"]
+)
 
 
-def resample(rows: Iterable[dict], seconds: int = 300, skip_flags=("backlog",)) -> list[dict]:
+def resample(
+    rows: Iterable[dict], seconds: int = 300, skip_flags=("backlog",)
+) -> list[dict]:
     """Bucket rows into fixed intervals (start-labelled).
 
     Rows carrying any flag in `skip_flags` are excluded from the means (their
@@ -192,16 +272,21 @@ def resample(rows: Iterable[dict], seconds: int = 300, skip_flags=("backlog",)) 
     out = []
     for key in sorted(buckets):
         group = buckets[key]
-        o = {"time": datetime.fromtimestamp(key, timezone.utc), "n": len(group),
-             "n_direct": sum(r["link"] == "direct" for r in group),
-             "n_imt": sum(r["link"] == "imt" for r in group)}
+        o = {
+            "time": datetime.fromtimestamp(key, timezone.utc),
+            "n": len(group),
+            "n_direct": sum(r["link"] == "direct" for r in group),
+            "n_imt": sum(r["link"] == "imt" for r in group),
+        }
         for f in _MEAN_FIELDS:
             vals = [r[f] for r in group if r[f] is not None]
             o[f] = sum(vals) / len(vals) if vals else None
         for f in _ANGLE_FIELDS:
             vals = [math.radians(r[f]) for r in group if r[f] is not None]
             if vals:
-                deg = math.degrees(math.atan2(sum(map(math.sin, vals)), sum(map(math.cos, vals))))
+                deg = math.degrees(
+                    math.atan2(sum(map(math.sin, vals)), sum(map(math.cos, vals)))
+                )
                 o[f] = deg % 360
             else:
                 o[f] = None
@@ -235,13 +320,30 @@ def _fmt(v):
 
 
 def summary(rows: list[dict]) -> str:
-    lines = [f"rows: {len(rows)}",
-             f"span: {rows[0]['time']:%Y-%m-%d %H:%M} -> {rows[-1]['time']:%Y-%m-%d %H:%M} UTC"]
-    lines.append("by link: " + ", ".join(f"{k}={v}" for k, v in Counter(r["link"] for r in rows).most_common()))
-    lines.append("by mode: " + ", ".join(f"{k}={v}" for k, v in Counter(r["mode_name"] for r in rows).most_common()))
+    lines = [
+        f"rows: {len(rows)}",
+        f"span: {rows[0]['time']:%Y-%m-%d %H:%M} -> "
+        f"{rows[-1]['time']:%Y-%m-%d %H:%M} UTC",
+    ]
+    lines.append(
+        "by link: "
+        + ", ".join(
+            f"{k}={v}" for k, v in Counter(r["link"] for r in rows).most_common()
+        )
+    )
+    lines.append(
+        "by mode: "
+        + ", ".join(
+            f"{k}={v}" for k, v in Counter(r["mode_name"] for r in rows).most_common()
+        )
+    )
     flags = Counter(f for r in rows for f in r["flags"])
-    lines.append("flags: " + (", ".join(f"{k}={v}" for k, v in flags.most_common()) or "none"))
-    reboots = sorted({f"{r['time']:%m-%d %H:%M}" for r in rows if "reboot" in r["flags"]})
+    lines.append(
+        "flags: " + (", ".join(f"{k}={v}" for k, v in flags.most_common()) or "none")
+    )
+    reboots = sorted(
+        {f"{r['time']:%m-%d %H:%M}" for r in rows if "reboot" in r["flags"]}
+    )
     if reboots:
         lines.append("autopilot restarts: " + ", ".join(reboots))
     last_direct = max((r["time"] for r in rows if r["link"] == "direct"), default=None)
@@ -250,7 +352,11 @@ def summary(rows: list[dict]) -> str:
     for f in ("battery_pct", "battery_v", "solar_w", "thruster_w", "temperature_c"):
         vals = [r[f] for r in rows if r[f] is not None]
         if vals:
-            lines.append(f"{f}: n={len(vals)} min={min(vals):.2f} mean={sum(vals)/len(vals):.2f} max={max(vals):.2f}")
+            mean = sum(vals) / len(vals)
+            lines.append(
+                f"{f}: n={len(vals)} min={min(vals):.2f} "
+                f"mean={mean:.2f} max={max(vals):.2f}"
+            )
     return "\n".join(lines)
 
 
@@ -258,10 +364,17 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("csv", help="raw Tether export")
     p.add_argument("-o", "--out", help="write cleaned CSV here")
-    p.add_argument("--resample", type=int, metavar="SECONDS",
-                   help="bucket into fixed intervals (excludes backlog rows)")
-    p.add_argument("--no-globalstar", action="store_true",
-                   help="drop backup-tracker rows (position only)")
+    p.add_argument(
+        "--resample",
+        type=int,
+        metavar="SECONDS",
+        help="bucket into fixed intervals (excludes backlog rows)",
+    )
+    p.add_argument(
+        "--no-globalstar",
+        action="store_true",
+        help="drop backup-tracker rows (position only)",
+    )
     p.add_argument("--summary", action="store_true", help="print a summary")
     a = p.parse_args(argv)
 
