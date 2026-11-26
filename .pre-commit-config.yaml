@@ -39,7 +39,7 @@ repos:
         name: block private data and brief files
         language: fail
         entry: "Private inputs must not be committed (see AGENTS.md):"
-        files: '(\.csv$|(^|/)BRIEF\.md$|(^|/)DATA\.md$)'
+        files: '(\.csv$|(^|/)BRIEF\.md$|(^|/)DATA\.md$|(^|/)\.env$)'
 
   - repo: https://github.com/asottile/pyupgrade
     rev: v3.21.0

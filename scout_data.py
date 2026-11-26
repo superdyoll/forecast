@@ -4,13 +4,13 @@
 Standard library only, so the same code can run on the boat's computer.
 
 Usage:
-    python3 scout_data.py scout_telemetry_2025-07.csv -o data/clean.csv
-    python3 scout_data.py scout_telemetry_2025-07.csv -o data/5min.csv --resample 300
-    python3 scout_data.py scout_telemetry_2025-07.csv --summary
+    python3 scout_data.py --csv telemetry.csv -o data/clean.csv
+    python3 scout_data.py --csv telemetry.csv -o data/5min.csv --resample 300
+    python3 scout_data.py --csv telemetry.csv --summary
 
 As a library:
     from scout_data import load, resample
-    rows = load("scout_telemetry_2025-07.csv")
+    rows = load("telemetry.csv")
 
 Cleaning rules (each from inspecting the raw file; see DATA.md for columns):
   * `null` -> None. Timestamps parsed as UTC (fractional seconds vary in length).
@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import os
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -361,9 +362,69 @@ def summary(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+CSV_ENV = "SCOUT_TELEMETRY_CSV"
+_dotenv_dir: Path | None = None  # directory of the .env that was loaded
+
+
+def find_dotenv() -> Path | None:
+    """Nearest .env above the current directory, else above the running script."""
+    starts = [Path.cwd()]
+    if sys.argv and sys.argv[0]:
+        starts.append(Path(sys.argv[0]).resolve().parent)
+    for start in starts:
+        for d in (start, *start.parents):
+            if (d / ".env").is_file():
+                return d / ".env"
+    return None
+
+
+def load_dotenv(path: str | Path | None = None) -> Path | None:
+    """Load KEY=VALUE lines from a .env file into os.environ.
+
+    Variables already set in the environment win. Supports blank lines,
+    `# comments`, an optional `export ` prefix and quoted values. Returns
+    the file loaded, or None.
+    """
+    global _dotenv_dir
+    f = Path(path) if path else find_dotenv()
+    if f is None or not f.is_file():
+        return None
+    for line in f.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key[7:].strip() if key.startswith("export ") else key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+    _dotenv_dir = f.parent.resolve()
+    return f
+
+
+def csv_arg(ap: argparse.ArgumentParser) -> None:
+    """Add --csv. Defaults to $SCOUT_TELEMETRY_CSV from the environment or a .env.
+
+    There is no built-in path. A relative path in .env is taken relative to
+    the .env file; one from the shell is relative to the current directory.
+    """
+    from_shell = os.environ.get(CSV_ENV)
+    load_dotenv()
+    default = os.environ.get(CSV_ENV)
+    if default and not from_shell and _dotenv_dir and not Path(default).is_absolute():
+        default = str(_dotenv_dir / default)
+    ap.add_argument(
+        "--csv",
+        default=default,
+        required=not default,
+        help=f"raw Tether CSV export (default: ${CSV_ENV}, also read from .env)",
+    )
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("csv", help="raw Tether export")
+    csv_arg(p)
     p.add_argument("-o", "--out", help="write cleaned CSV here")
     p.add_argument(
         "--resample",

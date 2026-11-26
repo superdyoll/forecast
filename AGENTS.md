@@ -33,8 +33,9 @@ inputs and may not exist in a fresh clone.
 | Path | Status |
 | --- | --- |
 | `scout_data.py` | Done. Loads, cleans and resamples the raw Tether CSV export. |
-| `model/train_lstm.py` | Experimental. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. Needs `model/requirements.txt`; training only, not for the boat. Runs go to `model/runs/` (gitignored). |
-| forecast, service, SITL sim, web page, systemd units, tests | Not started yet |
+| `model/lstm/train_lstm.py` | Experimental. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. Needs `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
+| `model/physical/` | Energy-balance model (stdlib only): `energy.py` (grid, fit, simulate), `evaluate.py` (same k-fold as the LSTM), `forecast.py`. Best model so far (3.1 points over 12 h with a known plan). `./forecast` runs it; `python3 -m model.physical.evaluate` checks it, writing to `runs/physical/`. |
+| service, SITL sim, web page, systemd units, tests | Not started yet |
 
 Update this table when you add components.
 
@@ -46,19 +47,35 @@ Update this table when you add components.
   service). Keep heavier dependencies such as numpy, pymavlink or a web framework out
   of that code path. If you add any, list them in a requirements file and say which
   component needs them.
-- The finished system runs on Linux with systemd. Don't hard-code macOS paths.
+- The finished system runs on Linux with systemd. **Don't hard-code paths**: no data
+  file names, no repo location (`Path(__file__).parents[...]`), no `sys.path` edits.
+  Take inputs via `--csv` / `SCOUT_TELEMETRY_CSV` (`scout_data.csv_arg`, which also
+  reads a gitignored `.env`; shell variables win), write
+  outputs relative to the current directory, and run package code as
+  `python3 -m model.<...>` from the repo root.
 
 ## Commands
 
 ```sh
+# Run from the repo root. The CSV path is never built in: pass --csv or set
+# SCOUT_TELEMETRY_CSV. Outputs go under ./runs/ (gitignored).
+cp .env.example .env   # then set SCOUT_TELEMETRY_CSV (a shell export overrides it)
+
 # Summary of the raw data: links, modes, flags, restarts, value ranges
-python3 scout_data.py scout_telemetry_2025-07.csv --summary
+python3 scout_data.py --summary
 
-# One cleaned row per message
-python3 scout_data.py scout_telemetry_2025-07.csv -o data/clean.csv
+# One cleaned row per message / fixed-interval averages (backlog rows excluded)
+python3 scout_data.py -o data/clean.csv
+python3 scout_data.py -o data/5min.csv --resample 300
 
-# Fixed-interval averages (in seconds), with backlog rows excluded
-python3 scout_data.py scout_telemetry_2025-07.csv -o data/5min.csv --resample 300
+# Battery forecast (physical model). Fitted with the forecast window held out.
+./forecast --from 2025-07-23T00:00Z --hours 24 [--plan persist] [--json out.json]
+
+# Cross-validate the physical model; also writes params.json fitted on all data
+python3 -m model.physical.evaluate [--lstm-results runs/lstm/<ts>/results.json]
+
+# LSTM experiment (needs model/lstm/requirements.txt)
+python3 -m model.lstm.train_lstm
 ```
 
 As a library:

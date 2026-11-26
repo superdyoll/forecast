@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Train an LSTM to forecast Scout's battery state of charge (SoC).
 
 Given the last `--lookback-h` hours of telemetry, the model predicts the change
@@ -6,8 +5,8 @@ in battery_pct at every step of the next `--horizon-h` hours. It is evaluated
 with blocked, purged k-fold cross-validation and compared against two
 baselines. A model that can't beat the baselines isn't worth using.
 
-    python3 model/train_lstm.py scout_telemetry_2025-07.csv
-    python3 model/train_lstm.py small.csv --lookback-h 6 --horizon-h 3 \
+    python3 -m model.lstm.train_lstm --csv telemetry.csv
+    python3 -m model.lstm.train_lstm --csv small.csv --lookback-h 6 --horizon-h 3 \
         --folds 3 --epochs 3                                  # quick smoke test
 
 Data-driven choices (see AGENTS.md "Data facts"):
@@ -35,6 +34,7 @@ Data-driven choices (see AGENTS.md "Data facts"):
   the last contiguous slice of the training data, purged the same way.
 * Scalers are fitted on each fold's training windows only.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,9 +47,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
-from scout_data import load, resample  # noqa: E402
+from scout_data import csv_arg, load, resample
 
 FEATURES = [
     "battery_pct",
@@ -295,7 +293,7 @@ def _nanmean(a):
 # -------------------------------------------------------------------------- main
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("csv", help="raw Tether CSV export")
+    csv_arg(p)
     p.add_argument("--step-min", type=int, default=15)
     p.add_argument("--lookback-h", type=float, default=24)
     p.add_argument("--horizon-h", type=float, default=12)
@@ -310,7 +308,9 @@ def main(argv=None) -> int:
     p.add_argument("--epochs", type=int, default=200)
     p.add_argument("--patience", type=int, default=15)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--out", default=str(REPO / "model" / "runs"))
+    p.add_argument(
+        "--out", default="runs/lstm", help="relative to the current directory"
+    )
     p.add_argument("--no-final", action="store_true", help="skip the all-data fit")
     p.add_argument("--verbose", type=int, default=0, choices=[0, 1, 2])
     a = p.parse_args(argv)

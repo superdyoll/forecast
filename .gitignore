@@ -1,4 +1,7 @@
 *.csv
 BRIEF.md
 DATA.md
-model/runs/
+model/*/runs/
+runs/
+.env
+.venv/
