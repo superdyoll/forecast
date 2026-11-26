@@ -33,6 +33,7 @@ inputs and may not exist in a fresh clone.
 | Path | Status |
 | --- | --- |
 | `scout_data.py` | Done. Loads, cleans and resamples the raw Tether CSV export. |
+| `model/train_lstm.py` | Experimental. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. Needs `model/requirements.txt`; training only, not for the boat. Runs go to `model/runs/` (gitignored). |
 | forecast, service, SITL sim, web page, systemd units, tests | Not started yet |
 
 Update this table when you add components.
