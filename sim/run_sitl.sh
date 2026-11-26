@@ -28,9 +28,13 @@ export SCOUT_CLOCK="$("$PYTHON" -m scout_sim.run clock --start "$SIM_START" --ra
 echo "clock: $SCOUT_CLOCK   output: $SIM_WORK"
 
 # --- ArduPilot SITL: Rover, motor-sailboat model (the 4.0 boat model with water current)
-if "$DOCKER" container inspect "$CONTAINER" >/dev/null 2>&1; then
-  "$DOCKER" start "$CONTAINER" >/dev/null
+if "$DOCKER" container inspect "$CONTAINER" >/dev/null 2>&1 \
+   && "$DOCKER" start "$CONTAINER" >/dev/null && sleep 2 \
+   && [ "$("$DOCKER" container inspect -f '{{.State.Running}}' "$CONTAINER")" = true ]; then
+  :
 else
+  # Missing, or won't restart (seen with amd64 emulation on arm64): recreate.
+  "$DOCKER" container inspect "$CONTAINER" >/dev/null 2>&1 && "$DOCKER" rm -f "$CONTAINER" >/dev/null
   "$DOCKER" run -d --name "$CONTAINER" --platform linux/amd64 \
     -p 5760:5760 -p 5762:5762 -p 5763:5763 -v "$here/sitl:/scout:ro" \
     --entrypoint /ardupilot/build/sitl/bin/ardurover radarku/ardupilot-sitl \

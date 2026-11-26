@@ -1,0 +1,47 @@
+# Scout low-power mission mode. Installed by packaging/install.sh, which
+# replaces @PREFIX@ and @ETC@.
+[Unit]
+Description=Scout low-power mission mode (energy forecast + ArduPilot control)
+Documentation=file:@PREFIX@/current/share/scout/README.md
+After=network.target
+# Never give up: on a boat there is nobody to type "systemctl reset-failed".
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+EnvironmentFile=-@ETC@/scout.env
+ExecStart=@PREFIX@/current/bin/scout-lowpower run
+User=scout
+Group=scout
+# Mission, state.json, decision.json, history.jsonl live here ($STATE_DIRECTORY).
+StateDirectory=scout-lowpower
+StateDirectoryMode=0755
+WorkingDirectory=/var/lib/scout-lowpower
+Restart=always
+RestartSec=5
+# The service pings the watchdog every loop (~0.5 s), including during
+# mission uploads; a hang of 30 s gets it killed and restarted.
+WatchdogSec=30
+TimeoutStartSec=30
+TimeoutStopSec=15
+
+# Hardening: it needs the network (MAVLink over TCP/UDP), its state dir,
+# and serial ports (the scout user is in dialout); nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

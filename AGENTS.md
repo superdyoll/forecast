@@ -39,7 +39,7 @@ inputs and may not exist in a fresh clone.
 | `src/scout_forecast/web.py` + `static/index.html` | `scout-web`: forecast vs actual page (stdlib server, no external assets, localhost by default). Reads the service's `decision.json` / `history.jsonl`; `/api/hindcast` forecasts past periods from the CSV. |
 | `src/scout_forecast/clock.py` | Shared simulated clock (`SCOUT_CLOCK`); the service plans with `clock.now()`. |
 | `sim/` | **Separate package `scout-sim`** (never on the boat): environment (current, wind, cloud) pushed into ArduPilot 4.0 SITL as `SIM_TIDE` drift, and a power model publishing `BATTERY_STATUS` to the service's `--power-link`. `sim/run_sitl.sh` runs SITL (docker `radarku/ardupilot-sitl`) + sim + service + web. |
-| systemd units | Not started yet |
+| `packaging/` | systemd units (`scout-lowpower` notify+watchdog, `scout-web`, simulation-only `scout-sitl` and `scout-sim`), `install.sh` (versioned releases in `/opt/scout/releases`, atomic `current` symlink, `/etc/scout/scout.env`, operator wrapper), `rollback.sh`. Unit paths are `@PREFIX@`/`@ETC@` templates filled by `install.sh`. |
 
 Update this table when you add components.
 

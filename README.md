@@ -42,6 +42,31 @@ power relay. Decisions, reasons and forecasts go to the log (journald) and to
 Settings: flags, else `SCOUT_MAVLINK`, `SCOUT_STATE_DIR` (or systemd's
 `$STATE_DIRECTORY`), `SCOUT_MISSION`, `SCOUT_PARAMS`, also read from `.env`.
 
+## Install as systemd services (Linux)
+
+```sh
+pip wheel . --no-deps -w dist                        # on shore (needs network once)
+sudo packaging/install.sh --wheels dist --params params.json   # on the boat (no network)
+sudo packaging/install.sh --with-sim                 # demo machine: + SITL (docker) + scout-sim
+scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --reserve 30
+systemctl status scout-lowpower scout-web
+journalctl -u scout-lowpower -f
+sudo packaging/rollback.sh --list                    # releases; * = current
+sudo packaging/rollback.sh                           # back to the previous release
+```
+
+| Unit | Runs | Notes |
+| --- | --- | --- |
+| `scout-lowpower.service` | the low-power mode | `Type=notify`, 30 s watchdog, `Restart=always`, never gives up; state in `/var/lib/scout-lowpower`; hardened (read-only system, no home, own user) |
+| `scout-web.service` | the web page | reads the service's state dir; `127.0.0.1:8080` unless `SCOUT_WEB_HOST` says otherwise |
+| `scout-sitl.service` | simulation: SITL in docker | restarting keeps the container, so SITL keeps its mission like a real autopilot |
+| `scout-sim.service` | simulation: sea, sky, power | feeds `BATTERY_STATUS` to the service's power link |
+
+Every install is a new release in `/opt/scout/releases/`, and `/opt/scout/current`
+switches atomically only after the new release has been checked to run.
+Rollback switches the symlink back and restarts. Config (`/etc/scout/scout.env`,
+`params.json`) and state are kept across releases.
+
 ## Simulation (ArduPilot SITL) and web page
 
 ```sh

@@ -1,0 +1,33 @@
+# Scout forecast-vs-actual web page. Installed by packaging/install.sh.
+[Unit]
+Description=Scout forecast-vs-actual web page
+Documentation=file:@PREFIX@/current/share/scout/README.md
+After=network.target scout-lowpower.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=-@ETC@/scout.env
+# Reads what scout-lowpower writes; never writes there.
+Environment=SCOUT_STATE_DIR=/var/lib/scout-lowpower
+ExecStart=@PREFIX@/current/bin/scout-web
+User=scout
+Group=scout
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

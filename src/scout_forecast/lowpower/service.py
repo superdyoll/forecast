@@ -59,6 +59,7 @@ log = logging.getLogger("scout_lowpower")
 
 SERVICE_MODES = (M.MODE_AUTO, M.MODE_HOLD, M.MODE_LOITER)
 HEARTBEAT_TIMEOUT_S = 5.0
+LOAD_FACTOR_MAX = 8.0
 REBOOT_GRACE_S = 60.0  # after a restart, the autopilot's own mode isn't an override
 STREAMS_HZ = {
     "GLOBAL_POSITION_INT": 1,
@@ -242,7 +243,6 @@ class Service:
         self.need_decide = True
         self.need_resync = True
         self.next_decide = 0.0
-        self.plan_since = 0.0  # monotonic time the commanded plan last changed
         self.prev_mode = None  # last observed autopilot mode
         self.mode_cmd_at = -1e9  # when we last commanded a mode change
         self.mode_cmd_want = None  # that mode, until a heartbeat confirms it
@@ -497,6 +497,10 @@ class Service:
                 )
                 if self._upload_mission(items):
                     self.uploaded = _signature(items)
+                    # A new mission starts at its first waypoint; the index the
+                    # autopilot reported belonged to the old mission.
+                    self.link.send("MISSION_SET_CURRENT", seq=1, **self._target())
+                    self.tel.mission_seq = None
                 else:
                     log.error("mission upload failed; retrying in 30 s")
                     self.retry_resync_at = now + 30
@@ -646,16 +650,20 @@ class Service:
             and pl.speed_ms
             and self.ap.mode == M.MODE_AUTO
             and self.ap.armed
-            and now - self.plan_since > 600
+            and pl.since is not None
+            and (_now() - pl.since).total_seconds() > 600  # simulated/boat seconds
         ):
-            load = t.mean(t.load, 600, now)
+            # Telemetry windows are in real seconds: scale by the clock rate.
+            load = t.mean(t.load, max(30.0, 600 / clock.rate()), now)
             prop = E.propulsion_w(self.params, pl.speed_ms)
             base = (
                 E.load_component(self.params, "hotel_w")
                 + E.load_component(self.params, "starlink_w") * pl.starlink_duty
             )
             if load is not None and prop > 1:
-                obs = min(3.0, max(0.5, (load - base) / prop))
+                # Wide limits: crabbing across a current or pushing into one can
+                # cost several times the still-water power for the same command.
+                obs = min(LOAD_FACTOR_MAX, max(0.3, (load - base) / prop))
                 self.load_factor = 0.8 * self.load_factor + 0.2 * obs
 
     def _cloud(self):
@@ -688,6 +696,12 @@ class Service:
             battery_w=t.battery_w,
             cloud=self._cloud(),
             load_factor=self.load_factor,
+            at_final=bool(
+                self.mission
+                and self.mission.kind == "transit"
+                and t.mission_seq is not None
+                and t.mission_seq > len(self.mission.waypoints)
+            ),
         )
 
     def _decide(self, now):
@@ -718,7 +732,6 @@ class Service:
             f"STATUS={new.action} {new.speed_ms or ''} battery {s.battery_pct:.0f}%"
         )
         if changed:
-            self.plan_since = now
             self.last.pop("speed", None)
             self.last.pop("mode", None)
         self._save_state()
@@ -845,7 +858,16 @@ def _settings(a) -> Settings:
 
 def _params(st: Settings) -> E.Params:
     if st.params:
-        return E.Params.from_dict(json.loads(st.params.read_text()))
+        try:
+            return E.Params.from_dict(json.loads(st.params.read_text()))
+        except (OSError, ValueError, TypeError) as e:
+            # Don't crash-loop under systemd over a missing or bad file.
+            log.error(
+                "can't read energy params %s (%s); using built-in defaults",
+                st.params,
+                e,
+            )
+            return E.Params()
     log.warning("no energy params (--params / SCOUT_PARAMS); using built-in defaults")
     return E.Params()
 

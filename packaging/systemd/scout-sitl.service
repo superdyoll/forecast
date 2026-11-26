@@ -1,0 +1,20 @@
+# SIMULATION ONLY: ArduPilot Rover SITL in docker, standing in for the autopilot.
+# `docker kill scout-sitl` (or systemctl kill) is the "autopilot dies" test:
+# systemd restarts it and, like a real autopilot, it keeps its stored mission
+# and parameters (the container is restarted, not recreated).
+[Unit]
+Description=ArduPilot Rover SITL (docker) for the Scout simulation
+After=docker.service
+Requires=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=-@ETC@/scout.env
+ExecStart=@PREFIX@/current/share/scout/sitl-container.sh
+ExecStop=/usr/bin/env docker stop -t 5 scout-sitl
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

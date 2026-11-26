@@ -54,6 +54,7 @@ _DEFS = {
         230,
         "seq:H target_system:B target_component:B mission_type:B",
     ),
+    "MISSION_SET_CURRENT": (41, 28, "seq:H target_system:B target_component:B"),
     "MISSION_CURRENT": (42, 28, "seq:H total:H mission_state:B mission_mode:B"),
     "MISSION_REQUEST_LIST": (
         43,
@@ -278,6 +279,24 @@ class Codec:
         return msg
 
 
+def _connect_tcp(addr, timeout=3.0):
+    """Connect trying IPv4 first; on failure report the IPv4 error, which is
+    the meaningful one ("refused") rather than an unrouted IPv6 address."""
+    infos = socket.getaddrinfo(addr[0], addr[1], type=socket.SOCK_STREAM)
+    infos.sort(key=lambda i: i[0] != socket.AF_INET)
+    first_err = None
+    for fam, typ, proto, _, sa in infos:
+        s = socket.socket(fam, typ, proto)
+        s.settimeout(timeout)
+        try:
+            s.connect(sa)
+            return s
+        except OSError as e:
+            s.close()
+            first_err = first_err or e
+    raise first_err or OSError(f"no address for {addr[0]}")
+
+
 class Connection:
     """A self-reconnecting MAVLink link. Call poll() often; send() any time."""
 
@@ -320,7 +339,7 @@ class Connection:
         host, _, port = self.rest.rpartition(":")
         addr = (host or "0.0.0.0", int(port))
         if self.kind == "tcp":
-            s = socket.create_connection(addr, timeout=3)
+            s = _connect_tcp(addr)
             s.setblocking(False)
         else:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

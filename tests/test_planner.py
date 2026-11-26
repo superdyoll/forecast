@@ -86,6 +86,19 @@ class TransitDecisions(unittest.TestCase):
         )
         self.assertNotEqual(after_dwell.speed_ms, 0.6)
 
+    def test_hold_expires_when_decisions_are_chained(self):
+        # Regression: the hold was timed from the previous *decision*, so a
+        # speed decided every 5 min was held forever.
+        m = transit()
+        p = decide(state(90), m, PARAMS)
+        p.speed_ms, p.since = 0.6, T0  # set 0.6 m/s at T0 (feasible, not preferred)
+        for minutes in range(5, 35, 5):
+            p = decide(state(90, t=T0 + timedelta(minutes=minutes)), m, PARAMS, prev=p)
+            if minutes < 15:
+                self.assertEqual(p.speed_ms, 0.6, minutes)
+        self.assertNotEqual(p.speed_ms, 0.6)
+        self.assertGreater(p.since, T0)
+
     def test_heavier_load_factor_means_slower(self):
         normal = decide(state(60), transit(), PARAMS)
         headwind = decide(state(60, load_factor=2.5), transit(), PARAMS)
@@ -128,6 +141,47 @@ class StationDecisions(unittest.TestCase):
         )
         p = decide(at_end, transit(), PARAMS)
         self.assertIn(p.action, ("hold", "drift"))
+
+
+class Arrival(unittest.TestCase):
+    def test_arrival_latches_while_loitering(self):
+        # Regression: a boat loitering 60 m off the last waypoint flipped
+        # back to "transit" because arrival was only "within 30 m".
+        m = transit()
+        at_end = BoatState(
+            time=T0, lat=60.50, lon=2.20, battery_pct=60, volt=23, next_wp=1
+        )
+        first = decide(at_end, m, PARAMS)
+        self.assertIn(first.action, ("hold", "drift"))
+        off = BoatState(
+            time=T0 + timedelta(minutes=5),
+            lat=60.5006,
+            lon=2.20,
+            battery_pct=60,
+            volt=23,
+            next_wp=1,
+        )  # ~65 m away
+        self.assertIn(decide(off, m, PARAMS, prev=first).action, ("hold", "drift"))
+
+    def test_autopilot_on_loiter_item_counts_as_arrived(self):
+        s = BoatState(
+            time=T0,
+            lat=60.5006,
+            lon=2.20,
+            battery_pct=60,
+            volt=23,
+            next_wp=1,
+            at_final=True,
+        )
+        self.assertIn(decide(s, transit(), PARAMS).action, ("hold", "drift"))
+
+
+class StaleIndex(unittest.TestCase):
+    def test_stale_loiter_index_far_from_the_end_is_not_arrival(self):
+        # Regression: the autopilot's index from the previous mission said
+        # "on the loiter item" and the new mission was declared done at once.
+        s = state(70, at_final=True)  # 33 km from the last waypoint
+        self.assertEqual(decide(s, transit(), PARAMS).action, "transit")
 
 
 class MissionValidation(unittest.TestCase):

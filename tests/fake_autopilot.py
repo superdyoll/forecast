@@ -35,6 +35,7 @@ class FakeRover:
         self.lock = threading.Lock()
         self._upload = None  # (count, items)
         self.errors = []
+        self.seq = 1
 
     # -- lifecycle -------------------------------------------------------------
     def start(self):
@@ -135,7 +136,7 @@ class FakeRover:
         self.send(
             "BATTERY_STATUS", id=2, voltages=[40000] + [65535] * 9, current_battery=50
         )
-        self.send("MISSION_CURRENT", seq=1)
+        self.send("MISSION_CURRENT", seq=self.seq)
 
     def _handle(self, m):
         n = m["name"]
@@ -185,6 +186,8 @@ class FakeRover:
                 self.send(
                     "MISSION_ACK", type=0, target_system=255, target_component=191
                 )
+        elif n == "MISSION_SET_CURRENT":
+            self.seq = m["seq"]
         elif n == "MISSION_REQUEST_LIST":
             self.send(
                 "MISSION_COUNT",

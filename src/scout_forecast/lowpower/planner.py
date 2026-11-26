@@ -66,6 +66,9 @@ class BoatState:
     battery_w: float | None = None  # measured battery power (+ charging)
     cloud: float | None = None  # observed / clear-sky solar ratio, recent
     load_factor: float = 1.0  # observed / modelled propulsion power
+    at_final: bool = (
+        False  # the autopilot is on the loiter item after the last waypoint
+    )
 
 
 @dataclass
@@ -81,12 +84,14 @@ class Plan:
     decided_at: datetime
     mission_id: str
     reasons: list = field(default_factory=list)
+    since: datetime | None = None  # when the current control (action/speed/duty) began
     forecast: list = field(default_factory=list)  # [[iso time, pct], ...] hourly
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d["eta"] = self.eta.isoformat() if self.eta else None
         d["decided_at"] = self.decided_at.isoformat()
+        d["since"] = self.since.isoformat() if self.since else None
         return d
 
     @classmethod
@@ -96,6 +101,7 @@ class Plan:
         d = dict(d)
         d["eta"] = parse_time(d["eta"]) if d.get("eta") else None
         d["decided_at"] = parse_time(d["decided_at"])
+        d["since"] = parse_time(d["since"]) if d.get("since") else None
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
     def same_control(self, other: Plan | None) -> bool:
@@ -133,8 +139,16 @@ def decide(
     if prev is not None and prev.mission_id != m.id:
         prev = None  # new mission: no hysteresis from the old one
     pos = (s.lat, s.lon)
-    arrived = (
-        m.kind == "transit" and remaining_m(m, pos, s.next_wp) <= m.arrival_radius_m
+    # Arrival latches: once the transit is done the boat keeps station, even
+    # when loitering carries it beyond arrival_radius_m of the last waypoint.
+    # ...but only near the final waypoint, so a bad index can't latch it.
+    near_end = (
+        m.kind == "transit" and distance_m(pos, m.waypoints[-1]) <= m.drift_radius_m
+    )
+    was_arrived = prev is not None and prev.action in ("hold", "drift")
+    arrived = m.kind == "transit" and (
+        remaining_m(m, pos, s.next_wp) <= m.arrival_radius_m
+        or (near_end and (s.at_final or was_arrived))
     )
     reasons = []
 
@@ -227,7 +241,8 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
 def _hysteresis(best, opts, prev, s, cfg, line, deadline_h, reasons):
     if prev is None or prev.action != "transit" or prev.speed_ms is None:
         return best
-    if (s.time - prev.decided_at).total_seconds() >= cfg.min_dwell_s:
+    since = prev.since or prev.decided_at  # when that speed was set
+    if (s.time - since).total_seconds() >= cfg.min_dwell_s:
         return best
     keep = next((o for o in opts if o.speed == prev.speed_ms), None)
     ok = keep is not None and keep.min_pct >= line
@@ -350,7 +365,7 @@ def _plan(opt: _Option, s, m, line, reasons, prev, cfg) -> Plan:
         for k, (t, v) in enumerate(zip(sim["time"], sim["pct"]))
         if (k + 1) % E.STEPS_PER_H == 0
     ]
-    return Plan(
+    plan = Plan(
         action=opt.action,
         speed_ms=opt.speed,
         starlink_duty=opt.duty,
@@ -364,3 +379,5 @@ def _plan(opt: _Option, s, m, line, reasons, prev, cfg) -> Plan:
         reasons=reasons,
         forecast=hourly,
     )
+    plan.since = (prev.since or prev.decided_at) if plan.same_control(prev) else s.time
+    return plan

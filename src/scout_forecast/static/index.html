@@ -193,7 +193,8 @@ function lineChart(host, { series, yLabel, yMin, yMax, refs = [], nowT = null, u
     const d = s.points.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
     svg.append(el("path", { d, fill: "none", stroke: `var(${s.color})`, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round", ...(s.dashed ? { "stroke-dasharray": "6 4" } : {}) }));
     const last = s.points[s.points.length - 1];
-    svg.append(el("text", { class: "dlabel", x: X(last[0]) + 6, y: Y(last[1]) + 4 }, s.name));
+    // End label; series flagged labelAbove sit above their end so they don't collide.
+    svg.append(el("text", { class: "dlabel", x: X(last[0]) + (s.labelAbove ? -4 : 6), y: Y(last[1]) + (s.labelAbove ? -10 : 4), "text-anchor": s.labelAbove ? "end" : "start" }, s.name));
   }
   const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" });
   svg.append(cross);
@@ -260,6 +261,12 @@ function renderLive() {
   const sel = $("made"), prev = sel.value;
   sel.replaceChildren(...d.forecasts.slice().reverse().map((f, i) => el("option", { value: f.made }, (i === 0 ? "latest: " : "") + fmtTime(new Date(f.made)))));
   if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  else if (d.forecasts.length) {
+    // Default: the forecast made ~3 h before the latest reading, so it overlaps what happened.
+    const lastT = T(d.forecasts[d.forecasts.length - 1].made) - 3 * 3.6e6;
+    const pick = d.forecasts.reduce((a, f) => (Math.abs(T(f.made) - lastT) < Math.abs(T(a.made) - lastT) ? f : a));
+    sel.value = pick.made;
+  }
   drawBattery(); drawPower(); drawErrors();
 }
 
@@ -269,7 +276,7 @@ function drawBattery() {
   const fc = f ? [[T(f.made), f.battery_pct], ...f.points.map((p) => [T(p[0]), p[1]])] : [];
   const reserve = d.decision?.mission?.min_reserve_pct;
   lineChart($("battery-chart"), {
-    series: [{ name: "Actual", color: "--series-1", points: actual }, { name: "Forecast", color: "--series-2", dashed: true, points: fc }],
+    series: [{ name: "Actual", color: "--series-1", points: actual, labelAbove: true }, { name: "Forecast", color: "--series-2", dashed: true, points: fc }],
     yLabel: "Battery %", unit: "%", refs: reserve != null ? [{ y: reserve, label: `reserve ${reserve}%` }] : [],
     nowT: actual.length ? actual[actual.length - 1][0] : null,
   });
