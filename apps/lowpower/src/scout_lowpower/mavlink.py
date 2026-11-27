@@ -308,6 +308,12 @@ class Connection:
             raise ValueError(
                 f"unsupported MAVLink URL {url!r} (tcp:, udpin:, udpout:, serial:)"
             )
+        # Checked now: a bad URL found at the first poll would crash the loop.
+        if self.kind == "serial":
+            if not rest.partition(":")[0]:
+                raise ValueError(f"MAVLink URL {url!r}: expected serial:DEVICE[:BAUD]")
+        elif not rest.rpartition(":")[2].isdigit():
+            raise ValueError(f"MAVLink URL {url!r}: expected {self.kind}:HOST:PORT")
         self.rest = rest
 
     @property

@@ -145,6 +145,11 @@ class Command(unittest.TestCase):
             self.run_cli("status")
         self.assertIn("bad $SCOUT_CLOCK", str(e.exception))
 
+    def test_a_bad_mavlink_url_is_a_clear_error(self):
+        with self.assertRaises(SystemExit) as e:
+            self.run_cli("run", "--mavlink", "tcp:localhost")
+        self.assertIn("expected tcp:HOST:PORT", str(e.exception))
+
     def test_plan_without_a_mission(self):
         with self.assertRaises(SystemExit) as e:
             self.run_cli("plan", "--lat", "60", "--lon", "2", "--pct", "50")

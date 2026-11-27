@@ -213,4 +213,8 @@ def main(argv=None) -> int:
             print(f"distance to station: {distance_m((a.lat, a.lon), m.station):.0f} m")
         return 0
     st.state_dir.mkdir(parents=True, exist_ok=True)
-    return Service(st, _params(st)).run()
+    try:
+        svc = Service(st, _params(st))
+    except ValueError as e:  # a bad SCOUT_MAVLINK / --mavlink
+        raise SystemExit(f"scout-lowpower: {e}")
+    return svc.run()
