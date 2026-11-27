@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install scout-forecast as systemd services (Linux, run as root).
+# Install the Scout apps as systemd services (Linux, run as root): scout-forecast,
+# scout-lowpower and scout-web, plus scout-sim with --with-sim.
 #
 #   sudo packaging/install.sh                        # build from this checkout and install
 #   sudo packaging/install.sh --wheels dist/         # install pre-built wheels (no network)
@@ -35,7 +36,7 @@ while [ $# -gt 0 ]; do
     --params) params="$2"; shift 2 ;;
     --with-sim) with_sim=1; shift ;;
     --no-start) start=0; shift ;;
-    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -54,25 +55,32 @@ if [ -n "$wheels" ]; then
   cp "$wheels"/*.whl "$tmp"/ || die "no wheels in $wheels"
 else
   echo "building wheels from $repo"
-  "$PYTHON" -m pip wheel --quiet --no-deps -w "$tmp" "$repo"
-  [ "$with_sim" = 0 ] || "$PYTHON" -m pip wheel --quiet --no-deps -w "$tmp" "$repo/sim"
+  "$PYTHON" -m pip wheel --quiet --no-deps -w "$tmp" \
+    "$repo/apps/forecast" "$repo/apps/lowpower" "$repo/apps/web"
+  [ "$with_sim" = 0 ] || "$PYTHON" -m pip wheel --quiet --no-deps -w "$tmp" "$repo/apps/sim"
 fi
-whl="$(ls "$tmp"/scout_forecast-*.whl | head -n1)" || die "no scout_forecast wheel"
-version="$(basename "$whl" | cut -d- -f2)"
+apps=(scout_forecast scout_lowpower scout_web)
+[ "$with_sim" = 0 ] || apps+=(scout_sim)
+pkgs=()
+for app in "${apps[@]}"; do
+  w="$(ls "$tmp"/"$app"-*.whl 2>/dev/null | head -n1)"
+  [ -n "$w" ] || die "no $app wheel"
+  pkgs+=("$w")
+done
+# The release is named after the boat service, the app that matters most.
+version="$(basename "${pkgs[1]}" | cut -d- -f2)"
 
 # --- 2. a new, self-contained release
 release="$PREFIX/releases/$version-$(date -u +%Y%m%dT%H%M%SZ)"
 echo "installing release $release"
 mkdir -p "$PREFIX/releases"
 "$PYTHON" -m venv "$release"
-pkgs=("$whl")
-[ "$with_sim" = 0 ] || pkgs+=("$(ls "$tmp"/scout_sim-*.whl | head -n1)")
 "$release/bin/pip" install --quiet --no-index --find-links "$tmp" "${pkgs[@]}"
 install -d "$release/share/scout/sitl"
 install -m 0644 "$repo/README.md" "$release/share/scout/README.md"
 install -m 0755 "$here/sitl-container.sh" "$release/share/scout/sitl-container.sh"
-install -m 0644 "$repo/sim/sitl/scout.parm" "$release/share/scout/sitl/scout.parm"
-"$release/bin/scout-lowpower" --help >/dev/null || die "new release doesn't run; current unchanged"
+install -m 0644 "$repo/apps/sim/sitl/scout.parm" "$release/share/scout/sitl/scout.parm"
+"$release/bin/scout-lowpower" --help >/dev/null && "$release/bin/scout-web" --help >/dev/null || die "new release doesn't run; current unchanged"
 
 # --- 3. user, config, wrapper
 id scout >/dev/null 2>&1 || useradd --system --user-group --home-dir /var/lib/scout-lowpower \

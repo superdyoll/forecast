@@ -38,14 +38,13 @@ inputs and may not exist in a fresh clone.
 
 | Path | Status |
 | --- | --- |
-| `src/scout_forecast/` | **The `scout-forecast` package** (wheel, stdlib only, no dependencies). `data.py` (load/clean/resample the Tether CSV), `energy.py` (physical model: grid, fit, simulate), `evaluate.py` (blocked, purged k-fold), `forecast.py`. Commands: `forecast`, `scout-evaluate`, `scout-data`. Best model so far (3.1 points over 12 h with a known plan). |
-| `model/lstm/train_lstm.py` | Experimental. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. Not part of the package: the package must never import or mention it. It depends on the package (`pip install -e .`) plus `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
-| `src/scout_forecast/lowpower/` | **Low-power mode service** (stdlib only): `planner.py` (pure decision logic), `mission.py` (operator mission file), `mavlink.py` (MAVLink v2 codec + self-reconnecting tcp/udp/serial links), `service.py` (`scout-lowpower run / set-mission / status / plan`). Survives link loss, autopilot restarts (resync, mission check, re-arm), operator overrides and its own restarts. |
-| `tests/` | `python -m unittest discover -s tests` (with the package installed). Planner decision tests, MAVLink codec tests (byte-for-byte vs pymavlink if installed) and a service recovery test against `tests/fake_autopilot.py` (~20 s). |
-| `src/scout_forecast/web.py` + `static/index.html` | `scout-web`: forecast vs actual page (stdlib server, no external assets, localhost by default). Reads the service's `decision.json` / `history.jsonl`; `/api/hindcast` forecasts past periods from the CSV. |
-| `src/scout_forecast/clock.py` | Shared simulated clock (`SCOUT_CLOCK`); the service plans with `clock.now()`. |
-| `sim/` | **Separate package `scout-sim`** (never on the boat): environment (current, wind, cloud) pushed into ArduPilot 4.0 SITL as `SIM_TIDE` drift, and a power model publishing `BATTERY_STATUS` to the service's `--power-link`. `sim/run_sitl.sh` runs SITL (docker `radarku/ardupilot-sitl`) + sim + service + web. |
-| `packaging/` | systemd units (`scout-lowpower` notify+watchdog, `scout-web`, simulation-only `scout-sitl` and `scout-sim`), `install.sh` (versioned releases in `/opt/scout/releases`, atomic `current` symlink, `/etc/scout/scout.env`, operator wrapper), `rollback.sh`. Unit paths are `@PREFIX@`/`@ETC@` templates filled by `install.sh`. |
+| `apps/` | One Python app per folder, each its own wheel with `pyproject.toml`, `src/<package>/` and `tests/`. Dependencies only point down: `forecast` <- `lowpower` <- `sim`, and `forecast` <- `web`. `web` and `lowpower` share only the state files, never imports. |
+| `apps/forecast/` | **`scout-forecast`** (`scout_forecast`, stdlib only, no dependencies): `data.py` (load/clean/resample the Tether CSV), `energy.py` (physical model: grid, fit, simulate, project), `evaluate.py` (blocked, purged k-fold), `forecast.py`. Also what the other apps share: `env.py` (`.env` and `--csv`), `clock.py` (simulated clock, `SCOUT_CLOCK`). Commands: `forecast`, `scout-evaluate`, `scout-data`. Best model so far (3.1 points over 12 h with a known plan). Its tests check it never imports the apps above it. |
+| `apps/lowpower/` | **`scout-lowpower`** (`scout_lowpower`, the boat service, stdlib + scout-forecast): `planner.py` (pure decision logic), `mission.py` (operator mission file), `mavlink.py` (MAVLink v2 codec + self-reconnecting tcp/udp/serial links), `service.py` (`scout-lowpower run / set-mission / status / plan`). Survives link loss, autopilot restarts (resync, mission check, re-arm), operator overrides and its own restarts. Tests: planner decisions, codec (byte-for-byte vs pymavlink if installed), recovery against `tests/fake_autopilot.py` (~20 s). |
+| `apps/web/` | **`scout-web`** (`scout_web`, stdlib + scout-forecast): `server.py` + `static/index.html`, forecast vs actual page (no external assets, localhost by default). Reads the service's `decision.json` / `history.jsonl`; `/api/hindcast` forecasts past periods from the CSV. |
+| `apps/sim/` | **`scout-sim`** (never on the boat): environment (current, wind, cloud) pushed into ArduPilot 4.0 SITL as `SIM_TIDE` drift, and a power model publishing `BATTERY_STATUS` to the service's `--power-link`. `apps/sim/run_sitl.sh` runs SITL (docker `radarku/ardupilot-sitl`) + sim + service + web. |
+| `model/lstm/train_lstm.py` | Experiment, not an app. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. No app may import or mention it. Needs scout-forecast plus `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
+| `packaging/` | Installs the forecast, lowpower and web wheels (plus sim with `--with-sim`) as one release. systemd units (`scout-lowpower` notify+watchdog, `scout-web`, simulation-only `scout-sitl` and `scout-sim`), `install.sh` (versioned releases in `/opt/scout/releases`, atomic `current` symlink, `/etc/scout/scout.env`, operator wrapper), `rollback.sh`. Unit paths are `@PREFIX@`/`@ETC@` templates filled by `install.sh`. |
 
 Update this table when you add components.
 
@@ -59,17 +58,20 @@ Update this table when you add components.
   component needs them.
 - The finished system runs on Linux with systemd. **Don't hard-code paths**: no data
   file names, no repo location (`Path(__file__).parents[...]`), no `sys.path` edits.
-  Take inputs via `--csv` / `SCOUT_TELEMETRY_CSV` (`scout_forecast.data.csv_arg`,
+  Take inputs via `--csv` / `SCOUT_TELEMETRY_CSV` (`scout_forecast.env.csv_arg`,
   which also reads a gitignored `.env`; shell variables win), and write outputs
-  relative to the current directory. Boat-side code goes in the package and is
-  exposed through `[project.scripts]` in `pyproject.toml`.
+  relative to the current directory. Boat-side code goes in an app under `apps/`
+  and is exposed through `[project.scripts]` in that app's `pyproject.toml`.
+- A new app gets its own folder in `apps/`, depends only on apps below it, and is
+  added to `requirements-dev.txt` and (if it goes on the boat) `packaging/install.sh`.
 
 ## Commands
 
 ```sh
-# Install the package (editable for development; needs pip >= 21.3)
-pip install -e .
-pip wheel . --no-deps -w dist        # build the wheel for the boat
+# Install every app, editable (needs pip >= 21.3; macOS's system pip 21.2
+# builds "UNKNOWN" wheels, so use a venv with a current pip)
+pip install -r requirements-dev.txt
+pip wheel --no-deps -w dist apps/forecast apps/lowpower apps/web   # wheels for the boat
 
 # The CSV path is never built in: pass --csv or set SCOUT_TELEMETRY_CSV.
 # Outputs go under ./runs/ (gitignored).
@@ -95,14 +97,12 @@ scout-lowpower status                       # current decision (decision.json)
 scout-lowpower plan --lat 60.2 --lon 2.2 --pct 55   # what-if, no autopilot
 
 # Simulation: SITL (docker) + scout-sim + service + web on http://127.0.0.1:8080
-pip install -e sim
-SIM_RATE=20 sim/run_sitl.sh
+SIM_RATE=20 apps/sim/run_sitl.sh
 
-# Tests
-python -m unittest discover -s tests
-python -m unittest discover -s sim/tests
+# Tests: each app has its own
+for d in apps/*/tests; do python -m unittest discover -s "$d" || break; done
 
-# LSTM experiment, outside the package (needs model/lstm/requirements.txt)
+# LSTM experiment, outside the apps (needs model/lstm/requirements.txt)
 python3 -m model.lstm.train_lstm
 ```
 
@@ -162,7 +162,7 @@ work around them a second time downstream.
   **only while armed**. Wind only acts on the sail, so `scout-sim` folds hull
   leeway into the tide vector and sets `SIM_WIND_SPD 0`.
 - Mission items must use `MAV_FRAME_GLOBAL_RELATIVE_ALT` (3) even in
-  `MISSION_ITEM_INT`; 4.0 rejects frame 6 with code 2. The fake rover in `tests/`
+  `MISSION_ITEM_INT`; 4.0 rejects frame 6 with code 2. The fake rover in `apps/lowpower/tests/`
   enforces this.
 - Stock Rover mode 17 is only `ROVER_MODE_ENUM_END`, so Scout's MODE_17 is a
   SentryOS mode. The service only commands AUTO, HOLD and LOITER.

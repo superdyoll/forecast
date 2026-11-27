@@ -1,0 +1,33 @@
+Nov 26 22:35:47.071109 530b653d363a systemd[1]: Starting scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control)...
+Nov 26 22:35:47.097793 530b653d363a systemd[1]: Started scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:37:40.333606 530b653d363a systemd[1]: Stopping scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control)...
+Nov 26 22:37:40.621351 530b653d363a systemd[1]: Stopped scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:37:40.632214 530b653d363a systemd[1]: Starting scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control)...
+Nov 26 22:37:40.675499 530b653d363a scout-lowpower[335]: INFO restored state: plan=hold load_factor=1.00 override=False
+Nov 26 22:37:40.675631 530b653d363a systemd[1]: Started scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:38:38.996120 530b653d363a systemd[1]: Stopping scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control)...
+Nov 26 22:38:39.287129 530b653d363a systemd[1]: Stopped scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:38:39.298138 530b653d363a systemd[1]: Starting scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control)...
+Nov 26 22:38:39.341117 530b653d363a scout-lowpower[395]: INFO restored state: plan=transit load_factor=1.00 override=False
+Nov 26 22:38:39.341240 530b653d363a systemd[1]: Started scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:38:44.367719 530b653d363a systemd[1]: Stopping scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control)...
+Nov 26 22:38:44.494800 530b653d363a systemd[1]: Stopped scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:38:44.502499 530b653d363a systemd[1]: Starting scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control)...
+Nov 26 22:38:44.536804 530b653d363a scout-lowpower[430]: INFO restored state: plan=transit load_factor=1.00 override=False
+Nov 26 22:38:44.536917 530b653d363a systemd[1]: Started scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:40:19.954403 530b653d363a systemd[1]: scout-lowpower.service: Main process exited, code=killed, status=9/KILL
+Nov 26 22:40:19.954476 530b653d363a systemd[1]: scout-lowpower.service: Failed with result 'signal'.
+Nov 26 22:40:24.972293 530b653d363a systemd[1]: scout-lowpower.service: Scheduled restart job, restart counter is at 1.
+Nov 26 22:40:24.972754 530b653d363a systemd[1]: Stopped scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:40:24.984616 530b653d363a systemd[1]: Starting scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control)...
+Nov 26 22:40:25.041272 530b653d363a scout-lowpower[455]: INFO restored state: plan=transit load_factor=1.00 override=False
+Nov 26 22:40:25.041473 530b653d363a systemd[1]: Started scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:40:57.721902 530b653d363a systemd[1]: scout-lowpower.service: Watchdog timeout (limit 30s)!
+Nov 26 22:40:57.722090 530b653d363a systemd[1]: scout-lowpower.service: Killing process 455 (scout-lowpower) with signal SIGABRT.
+Nov 26 22:40:57.726334 530b653d363a systemd[1]: scout-lowpower.service: Main process exited, code=killed, status=6/ABRT
+Nov 26 22:40:57.726484 530b653d363a systemd[1]: scout-lowpower.service: Failed with result 'watchdog'.
+Nov 26 22:41:02.972696 530b653d363a systemd[1]: scout-lowpower.service: Scheduled restart job, restart counter is at 2.
+Nov 26 22:41:02.973172 530b653d363a systemd[1]: Stopped scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).
+Nov 26 22:41:02.986289 530b653d363a systemd[1]: Starting scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control)...
+Nov 26 22:41:03.042717 530b653d363a scout-lowpower[472]: INFO restored state: plan=transit load_factor=1.00 override=False
+Nov 26 22:41:03.042888 530b653d363a systemd[1]: Started scout-lowpower.service - Scout low-power mission mode (energy forecast + ArduPilot control).

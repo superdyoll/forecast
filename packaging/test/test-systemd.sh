@@ -14,7 +14,8 @@ work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
 
 "$DOCKER" build -q -t scout-systemd-test -f "$here/Dockerfile.systemd" "$here" >/dev/null
-"$PYTHON" -m pip wheel --quiet --no-deps -w "$work/wheels" "$repo" "$repo/sim"
+"$PYTHON" -m pip wheel --quiet --no-deps -w "$work/wheels" \
+  "$repo/apps/forecast" "$repo/apps/lowpower" "$repo/apps/web" "$repo/apps/sim"
 "$DOCKER" run -d --name scout-systemd --privileged --cgroupns=host \
   -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
   -v "$repo:/src:ro" --add-host host.docker.internal:host-gateway \

@@ -1,0 +1,67 @@
+Nov 26 22:49:45.917954 a88c3cb9415f scout-lowpower[183]: WARNING MAVLink link closed: tcp:host.docker.internal:5760 (peer closed)
+Nov 26 22:49:46.921695 a88c3cb9415f scout-lowpower[183]: WARNING MAVLink link tcp:host.docker.internal:5760 unavailable ([Errno 111] Connection refused); retry in 1s
+Nov 26 22:49:47.922412 a88c3cb9415f scout-lowpower[183]: WARNING MAVLink link tcp:host.docker.internal:5760 unavailable ([Errno 111] Connection refused); retry in 2s
+Nov 26 22:49:49.922594 a88c3cb9415f scout-lowpower[183]: WARNING MAVLink link tcp:host.docker.internal:5760 unavailable ([Errno 111] Connection refused); retry in 4s
+Nov 26 22:49:50.326221 a88c3cb9415f scout-lowpower[183]: WARNING autopilot heartbeat lost (>5s); will resync when it returns
+Nov 26 22:49:53.923791 a88c3cb9415f scout-lowpower[183]: WARNING MAVLink link tcp:host.docker.internal:5760 unavailable ([Errno 111] Connection refused); retry in 8s
+Nov 26 22:50:01.926065 a88c3cb9415f scout-lowpower[183]: INFO MAVLink link open: tcp:host.docker.internal:5760
+Nov 26 22:50:02.072479 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Calibrating barometer
+Nov 26 22:50:03.133913 a88c3cb9415f scout-lowpower[183]: WARNING autopilot regained (sysid 1, mode INITIALISING)
+Nov 26 22:50:03.133913 a88c3cb9415f scout-lowpower[183]: WARNING autopilot initialising (sysid 1, mode INITIALISING)
+Nov 26 22:50:03.897347 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Barometer 1 calibration complete
+Nov 26 22:50:03.897347 a88c3cb9415f scout-lowpower[183]: INFO autopilot: <startup_ground> Ground start
+Nov 26 22:50:03.897347 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Beginning INS calibration. Do not move vehicle
+Nov 26 22:50:04.195171 a88c3cb9415f scout-lowpower[183]: WARNING autopilot initialising (sysid 1, mode INITIALISING)
+Nov 26 22:50:04.249184 a88c3cb9415f scout-lowpower[183]: WARNING autopilot initialising (sysid 1, mode INITIALISING)
+Nov 26 22:50:04.860030 a88c3cb9415f scout-lowpower[183]: INFO autopilot: INS: alloc 6144 bytes for ISB (free=131072)
+Nov 26 22:50:04.860030 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Ready to drive
+Nov 26 22:50:04.913803 a88c3cb9415f scout-lowpower[183]: INFO resyncing with autopilot
+Nov 26 22:50:04.914877 a88c3cb9415f scout-lowpower[183]: INFO autopilot: GPS 1: detected as u-blox at 115200 baud
+Nov 26 22:50:05.088545 a88c3cb9415f scout-lowpower[183]: WARNING autopilot restarted while armed: re-arming to continue the mission
+Nov 26 22:50:05.100197 a88c3cb9415f scout-lowpower[183]: INFO plan: transit 1.2 m/s, starlink duty 0.25, battery 69.6%, forecast low 53.8%, ETA 07-23 06:58Z | no deadline and energy to spare: fastest speed (1.2 m/s) keeping the low point at 54% (>= 50%)
+Nov 26 22:50:05.103273 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:05.103394 a88c3cb9415f scout-lowpower[183]: INFO setting cruise speed 1.2 m/s
+Nov 26 22:50:05.128375 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Throttle armed
+Nov 26 22:50:05.128375 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Flight mode change failed
+Nov 26 22:50:05.128375 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rejected command 176 (result 3)
+Nov 26 22:50:05.360792 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rebooted (sysid 1, mode MANUAL)
+Nov 26 22:50:05.361159 a88c3cb9415f scout-lowpower[183]: INFO resyncing with autopilot
+Nov 26 22:50:05.543881 a88c3cb9415f scout-lowpower[183]: INFO plan: transit 1.2 m/s, starlink duty 0.25, battery 69.8%, forecast low 54.0%, ETA 07-23 06:58Z | no deadline and energy to spare: fastest speed (1.2 m/s) keeping the low point at 54% (>= 50%)
+Nov 26 22:50:05.546416 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:05.546557 a88c3cb9415f scout-lowpower[183]: INFO setting cruise speed 1.2 m/s
+Nov 26 22:50:05.567149 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Flight mode change failed
+Nov 26 22:50:05.567149 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rejected command 176 (result 3)
+Nov 26 22:50:06.211370 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF2 IMU0 initial yaw alignment complete
+Nov 26 22:50:06.211370 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF2 IMU1 initial yaw alignment complete
+Nov 26 22:50:07.052371 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Set HOME to 60.20001 2.200005 at 0.15m
+Nov 26 22:50:10.428216 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:10.460331 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Flight mode change failed
+Nov 26 22:50:10.460331 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rejected command 176 (result 3)
+Nov 26 22:50:11.428355 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF2 IMU0 tilt alignment complete
+Nov 26 22:50:11.428355 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF2 IMU1 tilt alignment complete
+Nov 26 22:50:15.759132 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:16.425574 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Flight mode change failed
+Nov 26 22:50:16.425896 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rejected command 176 (result 3)
+Nov 26 22:50:16.425896 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF2 IMU0 origin set
+Nov 26 22:50:16.425896 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF2 IMU1 origin set
+Nov 26 22:50:16.936895 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF failsafe!
+Nov 26 22:50:20.820627 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:21.381707 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Flight mode change failed
+Nov 26 22:50:21.381707 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rejected command 176 (result 3)
+Nov 26 22:50:25.862370 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:25.883036 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Flight mode change failed
+Nov 26 22:50:25.883036 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rejected command 176 (result 3)
+Nov 26 22:50:30.921008 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:30.944742 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Flight mode change failed
+Nov 26 22:50:30.944742 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rejected command 176 (result 3)
+Nov 26 22:50:36.245835 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:36.282776 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Flight mode change failed
+Nov 26 22:50:36.282776 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rejected command 176 (result 3)
+Nov 26 22:50:41.410327 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:41.419423 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Flight mode change failed
+Nov 26 22:50:41.419423 a88c3cb9415f scout-lowpower[183]: WARNING autopilot rejected command 176 (result 3)
+Nov 26 22:50:42.107400 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF2 IMU0 is using GPS
+Nov 26 22:50:42.107400 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF2 IMU1 is using GPS
+Nov 26 22:50:43.106005 a88c3cb9415f scout-lowpower[183]: INFO autopilot: EKF failsafe cleared
+Nov 26 22:50:46.503777 a88c3cb9415f scout-lowpower[183]: INFO setting mode AUTO (was MANUAL)
+Nov 26 22:50:46.540829 a88c3cb9415f scout-lowpower[183]: INFO autopilot: Mission: 1 WP

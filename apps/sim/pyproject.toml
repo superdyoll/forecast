@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Simulation only: never installed on the boat. Uses scout-forecast for the
+# energy equations and scout-lowpower for the MAVLink codec.
+[project]
+name = "scout-sim"
+version = "0.1.0"
+description = "Environment (current, wind, cloud) and power simulation around ArduPilot SITL for scout-forecast"
+requires-python = ">=3.9"
+dependencies = ["scout-forecast", "scout-lowpower"]
+
+[project.scripts]
+scout-sim = "scout_sim.run:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["scout_sim*"]

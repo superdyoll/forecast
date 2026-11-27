@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# The boat service: decides how Scout operates and commands ArduPilot.
+[project]
+name = "scout-lowpower"
+dynamic = ["version"]
+description = "Low-power mission mode for Scout: energy-aware planner and MAVLink service for ArduPilot"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["scout-forecast"]  # the energy model; otherwise standard library only
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.scripts]
+scout-lowpower = "scout_lowpower.service:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "scout_lowpower.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["scout_lowpower*"]

@@ -1,0 +1,7 @@
+# Every app, editable, for development and the simulation (needs pip >= 21.3):
+#   pip install -r requirements-dev.txt
+# The boat only gets the wheels of forecast, lowpower and web (packaging/install.sh).
+-e apps/forecast
+-e apps/lowpower
+-e apps/web
+-e apps/sim

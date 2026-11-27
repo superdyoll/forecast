@@ -2,7 +2,7 @@
 
 Status as of 2026-11-26. Covers the telemetry analysis, the cleaning pipeline
 and the physical energy-balance model (both in the `scout-forecast` package,
-`src/scout_forecast/`, run with `forecast`), plus an LSTM experiment kept
+`apps/forecast/`, run with `forecast`), plus an LSTM experiment kept
 separately in `model/lstm/`.
 All numbers come from `scout_telemetry_2025-07.csv` (17 days, 24,674 messages).
 
@@ -165,7 +165,7 @@ there is a usable day/night signal for a better model to pick up.
 
 ## Physical energy-balance model
 
-`scout_forecast/energy.py` uses the standard library only, so it can run on the boat.
+`apps/forecast/src/scout_forecast/energy.py` uses the standard library only, so it can run on the boat.
 It simulates the battery on a 15-minute grid:
 
 - **Load:** the recorded load-channel value when the operating plan is known (the
@@ -296,7 +296,7 @@ speed above about 0.7 m/s coming from current rather than thrust. The low-power 
 ```sh
 # From the repo root. The CSV is never built in: pass --csv or set the variable.
 cp .env.example .env   # then set SCOUT_TELEMETRY_CSV (a shell export overrides it)
-pip install .                                            # scout-forecast package: stdlib only
+pip install -r requirements-dev.txt                      # the apps: stdlib only
 scout-data --summary
 forecast --from 2025-07-23T00:00Z --hours 24            # physical model
 scout-evaluate                                           # k-fold; writes ./runs/physical/<timestamp>/

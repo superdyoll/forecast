@@ -47,7 +47,8 @@ from pathlib import Path
 
 import numpy as np
 
-from scout_forecast.data import csv_arg, load, resample
+from scout_forecast.data import load, resample
+from scout_forecast.env import csv_arg
 
 FEATURES = [
     "battery_pct",

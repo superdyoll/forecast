@@ -1,4 +1,4 @@
 # Training only; not needed on the boat. Versions tested on Python 3.9 (arm64 macOS).
-# Also needs the scout-forecast package for data loading: run `pip install -e .` from the repo root.
+# Also needs the scout-forecast package for data loading: run `pip install -e apps/forecast` from the repo root.
 tensorflow>=2.16,<2.21  # bundles Keras 3
 numpy>=1.26,<2.1

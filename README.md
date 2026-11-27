@@ -1,13 +1,26 @@
-# scout-forecast
+# Scout energy forecast and low-power mode
 
-Battery forecast for Scout, a solar-electric robot boat. Standard library only
-(Python 3.9+), so it runs on the boat's computer.
+Battery forecast and low-power mission mode for Scout, a solar-electric robot
+boat. Standard library only (Python 3.9+), so it runs on the boat's computer.
+
+## Apps
+
+Each app in `apps/` is its own wheel. Dependencies only point down the table.
+
+| App | Package | Commands | On the boat |
+| --- | --- | --- | --- |
+| `apps/forecast` | `scout-forecast`: telemetry cleaning, energy model, shared settings and clock | `forecast`, `scout-evaluate`, `scout-data` | yes |
+| `apps/lowpower` | `scout-lowpower`: planner + MAVLink service (needs scout-forecast) | `scout-lowpower` | yes |
+| `apps/web` | `scout-web`: forecast against actual (needs scout-forecast; reads lowpower's state files) | `scout-web` | yes |
+| `apps/sim` | `scout-sim`: sea, sky and power around ArduPilot SITL | `scout-sim` | no |
+
+`model/lstm/` is a training experiment, not an app.
 
 ## Install
 
 ```sh
-pip install .                     # or: pip wheel . -w dist && pip install dist/scout_forecast-*.whl
-pip install -e .                  # development (needs pip >= 21.3)
+pip install -r requirements-dev.txt                               # all apps, editable (pip >= 21.3)
+pip wheel --no-deps -w dist apps/forecast apps/lowpower apps/web  # wheels for the boat
 ```
 
 ## Configure
@@ -45,7 +58,7 @@ Settings: flags, else `SCOUT_MAVLINK`, `SCOUT_STATE_DIR` (or systemd's
 ## Install as systemd services (Linux)
 
 ```sh
-pip wheel . --no-deps -w dist                        # on shore (needs network once)
+pip wheel --no-deps -w dist apps/forecast apps/lowpower apps/web  # on shore
 sudo packaging/install.sh --wheels dist --params params.json   # on the boat (no network)
 sudo packaging/install.sh --with-sim                 # demo machine: + SITL (docker) + scout-sim
 scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --reserve 30
@@ -70,15 +83,15 @@ Rollback switches the symlink back and restarts. Config (`/etc/scout/scout.env`,
 ## Simulation (ArduPilot SITL) and web page
 
 ```sh
-pip install -e . -e sim                 # sim/ is a separate package, never on the boat
-sim/run_sitl.sh                         # SITL in docker + scout-sim + scout-lowpower + scout-web
-SIM_RATE=20 sim/run_sitl.sh             # 20x clock: ~4 simulated hours in 12 minutes
+pip install -r requirements-dev.txt     # includes apps/sim, which never goes on the boat
+apps/sim/run_sitl.sh                    # SITL in docker + scout-sim + scout-lowpower + scout-web
+SIM_RATE=20 apps/sim/run_sitl.sh        # 20x clock: ~4 simulated hours in 12 minutes
 open http://127.0.0.1:8080
 ```
 
 * **SITL**: the `radarku/ardupilot-sitl` image (ArduPilot 4.0, Rover,
-  `sailboat-motor` boat model), started with `sim/sitl/scout.parm`.
-* **scout-sim** (`sim/`): current (mean + M2 tidal ellipse), wind (gusty,
+  `sailboat-motor` boat model), started with `apps/sim/sitl/scout.parm`.
+* **scout-sim** (`apps/sim/`): current (mean + M2 tidal ellipse), wind (gusty,
   hours-long weather) with hull leeway, and cloud are pushed into SITL as the
   `SIM_TIDE` drift vector, so ArduPilot's own controllers fight them. Its power
   model turns speed *through the water* into thruster load, adds hotel and
@@ -95,9 +108,8 @@ open http://127.0.0.1:8080
 ## Tests
 
 ```sh
-pip install -e .
-python -m unittest discover -s tests
-python -m unittest discover -s sim/tests     # with sim installed
+pip install -r requirements-dev.txt
+for d in apps/*/tests; do python -m unittest discover -s "$d" || break; done
 ```
 
 See `REPORT.md` for findings and accuracy, and `AGENTS.md` for project conventions.

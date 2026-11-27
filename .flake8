@@ -5,4 +5,4 @@ extend-ignore = E203, E701, E704
 exclude = .git, __pycache__, .venv, data
 # The MAVLink message table mirrors the XML definitions one message per line.
 per-file-ignores =
-    src/scout_forecast/lowpower/mavlink.py: E501
+    apps/lowpower/src/scout_lowpower/mavlink.py: E501

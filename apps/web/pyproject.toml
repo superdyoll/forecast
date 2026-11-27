@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Read-only viewer. Talks to scout-lowpower only through its state files.
+[project]
+name = "scout-web"
+dynamic = ["version"]
+description = "Forecast-against-actual web page for Scout (standard-library server, no external assets)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["scout-forecast"]  # hindcasts; otherwise standard library only
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.scripts]
+scout-web = "scout_web.server:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "scout_web.__version__" }
+
+[tool.setuptools.package-data]
+scout_web = ["static/*.html"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["scout_web*"]
