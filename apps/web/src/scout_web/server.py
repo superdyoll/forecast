@@ -32,15 +32,16 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from scout_forecast import energy as E
-from scout_forecast.env import CSV_ENV, csv_default, load_dotenv
-from scout_forecast.forecast import hindcast, parse_when
+from scout_forecast.evaluate import LEADS_H
+from scout_forecast.env import CSV_ENV, csv_default, load_dotenv, state_dir
+from scout_forecast.clock import parse_iso
+from scout_forecast.forecast import hindcast
 
 log = logging.getLogger("scout_web")
-LEADS_H = (1, 3, 6, 12, 24)
 MATCH_S = 600  # an actual reading within 10 min of a forecast time counts
 
 
-def read_history(state_dir: Path, hours: float | None = None) -> list[dict]:
+def read_history(state_dir: Path) -> list[dict]:
     rows = []
     for name in ("history.jsonl.1", "history.jsonl"):  # rotated file first
         p = state_dir / name
@@ -50,14 +51,11 @@ def read_history(state_dir: Path, hours: float | None = None) -> list[dict]:
             for line in fh:
                 try:
                     r = json.loads(line)
-                    r["_t"] = parse_when(r["time"])
+                    r["_t"] = parse_iso(r["time"])
                     rows.append(r)
                 except (ValueError, KeyError):
                     continue  # a half-written last line, or junk
     rows.sort(key=lambda r: r["_t"])
-    if hours and rows:
-        cutoff = rows[-1]["_t"] - timedelta(hours=hours)
-        rows = [r for r in rows if r["_t"] >= cutoff]
     return rows
 
 
@@ -80,7 +78,7 @@ def score(rows: list[dict]) -> dict:
     for r in rows:
         made = r["_t"]
         for ts, pct in r.get("forecast") or []:
-            t = parse_when(ts)
+            t = parse_iso(ts)
             lead = (t - made).total_seconds() / 3600
             h = round(lead)
             if h not in acc or abs(lead - h) > 0.01:
@@ -107,34 +105,23 @@ def live(state_dir: Path, hours: float) -> dict:
         decision = json.loads((state_dir / "decision.json").read_text())
     except (OSError, ValueError):
         decision = None
-    rows = read_history(state_dir, hours)
-    errors = score(read_history(state_dir))  # score over everything kept
+    every = read_history(state_dir)
+    errors = score(every)  # score over everything kept
+    cutoff = every[-1]["_t"] - timedelta(hours=hours) if every else None
+    rows = [r for r in every if r["_t"] >= cutoff]
     # Every forecast is kept for comparison, thinned to one per 30 min.
-    forecasts, last = [], None
-    for r in rows:
-        if r.get("forecast") and (
-            last is None or r["_t"] - last >= timedelta(minutes=30)
-        ):
-            forecasts.append(
-                {
-                    "made": r["time"],
-                    "battery_pct": r["battery_pct"],
-                    "points": r["forecast"],
-                }
-            )
+    made = [r for r in rows if r.get("forecast")]
+    kept, last = [], None
+    for r in made:
+        if last is None or r["_t"] - last >= timedelta(minutes=30):
+            kept.append(r)
             last = r["_t"]
-    if (
-        rows
-        and rows[-1].get("forecast")
-        and (not forecasts or forecasts[-1]["made"] != rows[-1]["time"])
-    ):
-        forecasts.append(
-            {
-                "made": rows[-1]["time"],
-                "battery_pct": rows[-1]["battery_pct"],
-                "points": rows[-1]["forecast"],
-            }
-        )
+    if made and kept[-1] is not made[-1]:
+        kept.append(made[-1])  # always the latest
+    forecasts = [
+        {"made": r["time"], "battery_pct": r["battery_pct"], "points": r["forecast"]}
+        for r in kept
+    ]
     keep = (
         "time",
         "battery_pct",
@@ -210,7 +197,7 @@ def make_handler(app: App):
                     # answers 304 with no body: cheap over a satellite link.
                     hours = min(max(float(q.get("hours", 48)), 1), 24 * 14)
                     body = json.dumps(live(app.state_dir, hours), default=str).encode()
-                    tag = '"%s"' % hashlib.blake2b(body, digest_size=8).hexdigest()
+                    tag = f'"{hashlib.blake2b(body, digest_size=8).hexdigest()}"'
                     if self.headers.get("If-None-Match") == tag:
                         self._send(
                             HTTPStatus.NOT_MODIFIED, b"", "application/json", tag
@@ -227,7 +214,7 @@ def make_handler(app: App):
                     plan = q.get("plan", "actual")
                     if plan not in ("actual", "persist"):
                         raise ValueError("plan must be actual or persist")
-                    self._json(hindcast(app.grid(), parse_when(q["from"]), hours, plan))
+                    self._json(hindcast(app.grid(), parse_iso(q["from"]), hours, plan))
                 else:
                     self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             except (ValueError, KeyError) as e:
@@ -257,13 +244,7 @@ def main(argv=None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
-    state = (
-        a.state_dir
-        or os.environ.get("SCOUT_STATE_DIR")
-        or os.environ.get("STATE_DIRECTORY")
-        or "lowpower-state"
-    )
-    app = App(Path(state.split(":")[0]), a.csv)
+    app = App(state_dir(a.state_dir), a.csv)
     srv = ThreadingHTTPServer((a.host, a.port), make_handler(app))
     log.info(
         "serving http://%s:%d (state %s, hindcast %s)",

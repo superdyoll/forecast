@@ -265,7 +265,7 @@ function renderLive() {
   const tile = (label, value, note, warn) => { const t = el("div", { class: "card tile" }); t.append(el("div", { class: "label" }, label), el("div", { class: "value" + (warn ? " warn" : "") }, value), el("div", { class: "note" }, note || "")); tiles.append(t); };
   const st = dec && dec.state, mission = dec && dec.mission;
   tile("Battery now", st ? fmt(st.battery_pct) + "%" : "–", st ? `${fmt(st.volt, 2)} V · reserve ${fmt(mission?.min_reserve_pct, 0)}%` : "");
-  tile("Plan", plan ? plan.action + (plan.speed_ms ? ` ${fmt(plan.speed_ms)} m/s` : "") : "–", plan ? `Starlink duty ${Math.round(plan.starlink_duty * 100)}%${plan.returning ? " · returning" : ""}` : "", plan && !plan.feasible);
+  tile("Plan", plan ? plan.action + (plan.speed_ms ? ` ${fmt(plan.speed_ms)} m/s` : "") : "–", plan ? `Starlink duty ${Math.round(plan.starlink_duty * 100)}%` : "", plan && !plan.feasible);
   tile("Forecast low", plan ? fmt(plan.min_pct) + "%" : "–", plan ? (plan.feasible ? "stays above reserve + margin" : "reserve at risk") : "", plan && !plan.feasible);
   tile(mission?.kind === "station" ? "Holding" : "Arrival", plan?.eta ? fmtTime(new Date(plan.eta)) : (mission?.kind === "station" ? "on station" : "–"), mission?.arrive_by ? `deadline ${fmtTime(new Date(mission.arrive_by))}` : (mission ? `${mission.kind} mission ${dec.mission_id}` : ""));
   $("plan-sub").textContent = plan ? `Decided ${fmtTime(new Date(plan.decided_at))} UTC` : "";
@@ -301,8 +301,9 @@ function drawBattery() {
     yLabel: "Battery %", unit: "%", refs: reserve != null ? [{ y: reserve, label: `reserve ${reserve}%` }] : [],
     nowT: actual.length ? actual[actual.length - 1][0] : null,
   });
-  const byT = new Map(actual.map((p) => [p[0], p[1]]));
-  table($("battery-table"), ["Time (UTC)", "Forecast %", "Actual %"], fc.map((p) => [fmtTime(new Date(p[0])), fmt(p[1]), fmt(byT.get(p[0]))]));
+  // Nearest reading within 10 min, as the server scores them (MATCH_S).
+  const near = (t) => { let b = null; for (const p of actual) if (Math.abs(p[0] - t) <= 6e5 && (!b || Math.abs(p[0] - t) < Math.abs(b[0] - t))) b = p; return b && b[1]; };
+  table($("battery-table"), ["Time (UTC)", "Forecast %", "Actual %"], fc.map((p) => [fmtTime(new Date(p[0])), fmt(p[1]), fmt(near(p[0]))]));
 }
 
 function drawPower() {

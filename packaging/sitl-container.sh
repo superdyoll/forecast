@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SIMULATION ONLY. Run ArduPilot Rover SITL in docker in the foreground, for
-# systemd (scout-sitl.service, from the scout-sim deb).
+# systemd (scout-sitl.service, from the scout-sim deb) and apps/sim/run_sitl.sh.
 #
 # * Pulls the SITL image on first run (large; progress is in the journal).
 # * Runs SITL at the simulated clock's rate (the "xN" of $SCOUT_CLOCK from
@@ -10,7 +10,8 @@
 #   rate changes (the rate is fixed when a container is created).
 set -euo pipefail
 share="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-name="${SCOUT_SITL_CONTAINER:-scout-sitl}"
+parm="${SCOUT_SITL_PARM_DIR:-$share/sitl}"  # holds scout.parm (apps/sim/run_sitl.sh sets it)
+name=scout-sitl  # also in scout-sitl.service (ExecStop) and the deb's purge
 image="${SCOUT_SITL_IMAGE:-radarku/ardupilot-sitl}"
 home="${SCOUT_SITL_HOME:-60.2,2.2,0,0}"
 rate="${SCOUT_CLOCK:-x1}"
@@ -54,7 +55,7 @@ fi
 echo "starting SITL x$rate (MAVLink tcp:127.0.0.1:5760 service, :5762 simulator)"
 exec docker run --name "$name" --label "scout.rate=$rate" --platform linux/amd64 \
   -p 127.0.0.1:5760:5760 -p 127.0.0.1:5762:5762 -p 127.0.0.1:5763:5763 \
-  -v "$share/sitl:/scout:ro" \
+  -v "$parm:/scout:ro" \
   --entrypoint /ardupilot/build/sitl/bin/ardurover "$image" \
   -S -I0 --model sailboat-motor --speedup "$rate" --home "$home" \
   --defaults /ardupilot/Tools/autotest/default_params/rover.parm,/ardupilot/Tools/autotest/default_params/sailboat-motor.parm,/scout/scout.parm

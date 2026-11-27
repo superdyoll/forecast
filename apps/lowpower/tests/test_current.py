@@ -47,9 +47,6 @@ class Estimate(unittest.TestCase):
         self.assertAlmostEqual(est[0], truth[0], places=6)
         self.assertAlmostEqual(est[1], truth[1], places=6)
 
-    def test_from_drift_is_the_ground_velocity(self):
-        self.assertEqual(C.from_drift((0.1, -0.2)), (0.1, -0.2))
-
     def test_blend(self):
         self.assertEqual(C.blend((0.0, 0.0), (1.0, 2.0), 0.5), (0.5, 1.0))
 

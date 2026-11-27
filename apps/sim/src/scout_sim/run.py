@@ -35,13 +35,13 @@ from scout_forecast import clock
 from scout_forecast import energy as E
 from scout_forecast.env import load_dotenv
 from scout_lowpower import mavlink as M
-from scout_lowpower.mission import parse_time
 
 from . import fast
-from .environment import EnvConfig, Environment
+from .environment import Environment, add_storm_args, env_config
 from .power import PowerModel, PowerTruth
 
 log = logging.getLogger("scout_sim")
+SITL = {"target_system": 1, "target_component": 1}
 
 
 class Sim:
@@ -54,16 +54,7 @@ class Sim:
             a.power_out, sysid=1, compid=M.MAV_COMP_ID_ONBOARD_COMPUTER + 2
         )
         start = clock.now()
-        cfg = EnvConfig(seed=a.seed)
-        if a.storm:
-            h0, hours = (float(x) for x in a.storm.split(":")[:2])
-            cfg = EnvConfig(
-                seed=a.seed,
-                storm_start_h=h0,
-                storm_hours=hours,
-                storm_cloud=a.storm_cloud,
-            )
-        self.env = Environment(cfg, start)
+        self.env = Environment(env_config(a.seed, a.storm, a.storm_cloud), start)
         self.power = PowerModel(PowerTruth(), model, pct0=a.pct0, seed=a.seed)
         self.truth_path = Path(a.truth)
         self.lat = self.lon = None
@@ -77,6 +68,7 @@ class Sim:
         self.last = {}
         self.sim_t = start
         self.opens = 0
+        self._pace_ref = None  # (boot ms, monotonic s) for check_pace
 
     def every(self, key, period, now):
         if now - self.last.get(key, -1e9) >= period:
@@ -126,27 +118,13 @@ class Sim:
                     self.command(M.MAV_CMD_COMPONENT_ARM_DISARM, 1)
 
     def command(self, cmd, *p):
-        p = list(p) + [0.0] * (7 - len(p))
-        self.sitl.send(
-            "COMMAND_LONG",
-            target_system=1,
-            target_component=1,
-            command=cmd,
-            **{f"param{i + 1}": float(v) for i, v in enumerate(p)},
-        )
+        self.sitl.command(SITL, cmd, *p)
 
     def request_streams(self):
         for name, hz in (("GLOBAL_POSITION_INT", 2), ("SYS_STATUS", 1)):
             self.command(M.MAV_CMD_SET_MESSAGE_INTERVAL, M.MESSAGES[name].id, 1e6 / hz)
         # Keep SITL's physics in step with the shared clock's rate.
-        self.sitl.send(
-            "PARAM_SET",
-            target_system=1,
-            target_component=1,
-            param_id="SIM_SPEEDUP",
-            param_value=float(clock.rate()),
-            param_type=M.MAV_PARAM_TYPE_REAL32,
-        )
+        self.sitl.param_set(SITL, "SIM_SPEEDUP", clock.rate())
 
     def on_message(self, m):
         n = m["name"]
@@ -177,7 +155,7 @@ class Sim:
         """Warn when SITL's physics can't keep up with the shared clock (seen
         with x86 emulation on Apple silicon: x5.5 at SIM_RATE=20). The boat
         then covers ground too slowly in clock time: arrivals look late."""
-        ref = getattr(self, "_pace_ref", None)
+        ref = self._pace_ref
         if ref is None or boot_ms < ref[0]:
             self._pace_ref = (boot_ms, now)
             return
@@ -201,15 +179,8 @@ class Sim:
         spd = math.hypot(dn, de)
         # SITL: tide velocity north = -cos(dir) * speed, i.e. dir = where it comes FROM.
         frm = math.degrees(math.atan2(-de, -dn)) % 360 if spd > 1e-3 else 0.0
-        for pid, val in (("SIM_TIDE_SPEED", spd), ("SIM_TIDE_DIR", frm)):
-            self.sitl.send(
-                "PARAM_SET",
-                target_system=1,
-                target_component=1,
-                param_id=pid,
-                param_value=float(val),
-                param_type=M.MAV_PARAM_TYPE_REAL32,
-            )
+        self.sitl.param_set(SITL, "SIM_TIDE_SPEED", spd)
+        self.sitl.param_set(SITL, "SIM_TIDE_DIR", frm)
 
     def step(self):
         t = clock.now()
@@ -227,7 +198,10 @@ class Sim:
         p = self.power.step(t, dt, lat, lon, u, self.armed, cloud)
         v = p["volt"]
         mv = int(v * 1000)
-        amps = lambda w, volts: int(round(w / volts * 100))  # noqa: E731  (cA)
+
+        def amps(w, volts):  # centiamps, as BATTERY_STATUS carries them
+            return int(round(w / volts * 100))
+
         self.out.send(
             "BATTERY_STATUS",
             id=0,
@@ -326,12 +300,7 @@ def main(argv=None) -> int:
         default=60.0,
         help="simulated seconds per truth line",
     )
-    r.add_argument(
-        "--storm",
-        metavar="START_H:HOURS",
-        help="cloud and gale from START_H, for HOURS",
-    )
-    r.add_argument("--storm-cloud", type=float, default=0.08)
+    add_storm_args(r)
     r.add_argument("-v", "--verbose", action="store_true")
     f = sub.add_parser(
         "fast", help="fast-time simulation without SITL (days in seconds)"
@@ -342,30 +311,17 @@ def main(argv=None) -> int:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
     if a.cmd == "clock":
-        print(clock.make(parse_time(a.start), a.rate))
+        print(clock.make(clock.parse_iso(a.start), a.rate))
         return 0
     if a.cmd == "fast":
         print(json.dumps(fast.run(a), indent=1))
         return 0
-    model = load_params(a.params)
+    model = E.load_params(a.params)
     try:
         Sim(a, model).run()
     except KeyboardInterrupt:
         pass
     return 0
-
-
-def load_params(path: str | None) -> E.Params:
-    """The energy model the simulator's power curve is built on: `path`, else
-    the fit shipped with scout-forecast. A missing or bad file falls back
-    instead of crash-looping, as the service does."""
-    if not path:
-        return E.fitted_params()
-    try:
-        return E.Params.from_dict(json.loads(Path(path).read_text()))
-    except (OSError, ValueError, TypeError) as e:
-        log.warning("can't read energy params %s (%s); using the shipped fit", path, e)
-        return E.fitted_params()
 
 
 if __name__ == "__main__":

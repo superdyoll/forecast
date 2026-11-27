@@ -33,23 +33,24 @@ from __future__ import annotations
 import argparse
 import csv
 import math
-
 import sys
 from collections import Counter
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Iterable
 
 from .env import csv_arg
 
-# ArduPilot Rover mode numbers seen in this file. 17 is not a stock Rover
-# mode; kept as an explicit unknown rather than guessed.
+# ArduPilot Rover mode numbers (also used by scout-lowpower). 17 is not a
+# stock Rover mode; kept as an explicit unknown rather than guessed.
 MODE_NAMES = {
     0: "MANUAL",
+    3: "STEERING",
     4: "HOLD",
     5: "LOITER",
     10: "AUTO",
     11: "RTL",
+    12: "SMART_RTL",
     15: "GUIDED",
     16: "INITIALISING",
     17: "MODE_17",
@@ -191,7 +192,7 @@ def _clean(raw: dict) -> dict:
     bus_v = r["thruster_v"] or r["battery_v"]
     r["battery_w"] = _mul(r["battery_v"], r["battery_a"])
     r["thruster_w"] = _mul(bus_v, r["thruster_a"])
-    r["solar_w"] = _mul(r["solar_v"], r["solar_a"])  # panel side, before MPPT
+    r["solar_w"] = _mul(r["solar_v"], r["solar_a"])  # before or after MPPT: unconfirmed
     # Residual: conversion losses + timing mismatch (~2 W on average).
     if None not in (r["solar_w"], r["thruster_w"], r["battery_w"]):
         r["other_w"] = r["solar_w"] - r["thruster_w"] - r["battery_w"]

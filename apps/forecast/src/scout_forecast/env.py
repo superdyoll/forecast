@@ -14,6 +14,7 @@ from pathlib import Path
 CSV_ENV = "SCOUT_TELEMETRY_CSV"
 _dotenv_dir: Path | None = None  # directory of the .env that was loaded
 _dotenv_keys: set = set()  # variables that came from .env, not the shell
+_searched = False  # load_dotenv() has run (found a file or not)
 
 
 def find_dotenv() -> Path | None:
@@ -35,7 +36,8 @@ def load_dotenv(path: str | Path | None = None) -> Path | None:
     `# comments`, an optional `export ` prefix and quoted values. Returns
     the file loaded, or None.
     """
-    global _dotenv_dir
+    global _dotenv_dir, _searched
+    _searched = True
     f = Path(path) if path else find_dotenv()
     if f is None or not f.is_file():
         return None
@@ -61,12 +63,20 @@ def csv_default() -> str | None:
     A relative path from .env is relative to the .env file; one from the
     shell is relative to the current directory.
     """
-    if _dotenv_dir is None:
+    if not _searched:
         load_dotenv()
     v = os.environ.get(CSV_ENV)
     if v and CSV_ENV in _dotenv_keys and _dotenv_dir and not Path(v).is_absolute():
         v = str(_dotenv_dir / v)
     return v or None
+
+
+def state_dir(arg: str | None = None) -> Path:
+    """The low-power service's state directory: `arg` (--state-dir), else
+    $SCOUT_STATE_DIR, $STATE_DIRECTORY (systemd; the first of a ':' list) or
+    ./lowpower-state. Shared by scout-lowpower and scout-web."""
+    v = arg or os.environ.get("SCOUT_STATE_DIR") or os.environ.get("STATE_DIRECTORY")
+    return Path((v or "lowpower-state").split(":")[0])
 
 
 def csv_arg(ap: argparse.ArgumentParser) -> None:

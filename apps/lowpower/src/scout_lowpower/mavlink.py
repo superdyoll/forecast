@@ -1,4 +1,5 @@
-"""Minimal MAVLink v2 for the low-power service. Standard library only.
+"""Minimal MAVLink v2 for the low-power service. Standard library only
+(plus scout-forecast's mode-name table).
 
 Covers only the messages the service uses (layouts and CRC extras from the
 common/ardupilotmega definitions; tests check them byte-for-byte against
@@ -19,10 +20,12 @@ import socket
 import struct
 import time
 
+from scout_forecast.data import MODE_NAMES
+
 log = logging.getLogger(__name__)
 
-# name: (msgid, crc_extra, [(field, struct code, count)]) in wire order,
-# extension fields included at the end.
+# name: (msgid, crc_extra, "field:code[*count] ...") in wire order, extension
+# fields included at the end; code is a struct format character.
 _DEFS = {
     "HEARTBEAT": (
         0,
@@ -124,7 +127,6 @@ BY_ID = {m.id: m for m in MESSAGES.values()}
 MAV_TYPE_GCS = 6
 MAV_TYPE_ONBOARD_CONTROLLER = 18
 MAV_AUTOPILOT_INVALID = 8
-MAV_COMP_ID_AUTOPILOT1 = 1
 MAV_COMP_ID_ONBOARD_COMPUTER = 191
 MAV_MODE_FLAG_SAFETY_ARMED = 128
 MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1
@@ -140,17 +142,7 @@ MAV_CMD_SET_MESSAGE_INTERVAL = 511
 MAV_FRAME_GLOBAL_RELATIVE_ALT = 3
 MAV_MISSION_ACCEPTED = 0
 MAV_PARAM_TYPE_REAL32 = 9
-ROVER_MODES = {
-    0: "MANUAL",
-    3: "STEERING",
-    4: "HOLD",
-    5: "LOITER",
-    10: "AUTO",
-    11: "RTL",
-    12: "SMART_RTL",
-    15: "GUIDED",
-    16: "INITIALISING",
-}
+ROVER_MODES = MODE_NAMES  # one table, shared with the telemetry loader
 MODE_HOLD, MODE_LOITER, MODE_AUTO, MODE_INITIALISING = 4, 5, 10, 16
 
 
@@ -418,12 +410,32 @@ class Connection:
             return []
         return self.codec.feed(data)
 
+    def command(self, target: dict, cmd: int, *params: float) -> bool:
+        """COMMAND_LONG to `target` ({target_system, target_component})."""
+        p = [float(v) for v in params] + [0.0] * (7 - len(params))
+        fields = {f"param{i + 1}": v for i, v in enumerate(p)}
+        return self.send(
+            "COMMAND_LONG", command=cmd, confirmation=0, **fields, **target
+        )
+
+    def param_set(self, target: dict, name: str, value: float) -> bool:
+        return self.send(
+            "PARAM_SET",
+            param_id=name,
+            param_value=float(value),
+            param_type=MAV_PARAM_TYPE_REAL32,
+            **target,
+        )
+
     def send(self, name: str, **values) -> bool:
         if not self._ensure():
             return False
         frame = self.codec.pack(name, **values)
         try:
             if self.kind == "tcp":
+                # Non-blocking: a full send buffer raises BlockingIOError after
+                # a partial write. It's an OSError, so the link is closed below
+                # and the half frame never reaches a reused stream. Keep it so.
                 self.sock.sendall(frame)
             elif self.sock is not None:
                 if self.peer is None:

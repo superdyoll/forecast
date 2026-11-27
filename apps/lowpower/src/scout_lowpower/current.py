@@ -27,9 +27,39 @@ def from_thrust(p: E.Params, ground, heading_deg: float, propulsion_w: float):
     return ground[0] - stw * math.cos(h), ground[1] - stw * math.sin(h)
 
 
-def from_drift(ground):
-    """Current while drifting with the motors off: the ground velocity."""
-    return ground[0], ground[1]
+def observe(
+    p: E.Params,
+    action: str,
+    duty: float,
+    mode_ok: bool,
+    armed: bool,
+    ground,
+    heading_deg,
+    load_w,
+):
+    """One observation of the current from a window of telemetry, or None.
+
+    `mode_ok`: the autopilot is in the mode the plan asks for. Motoring
+    (transit in AUTO, hold in LOITER, armed): from the propulsion power,
+    which is the load minus hotel and Starlink at `duty`. Motors off
+    (pause or drift in HOLD, or disarmed): the ground velocity itself.
+    """
+    if action in ("transit", "hold"):
+        if not (mode_ok and armed) or heading_deg is None or load_w is None:
+            return None
+        return from_thrust(p, ground, heading_deg, load_w - E.base_load_w(p, duty))
+    if action in ("pause", "drift") and (mode_ok or not armed):
+        return tuple(ground)
+    return None
+
+
+def cloud_factor(obs) -> float | None:
+    """Observed / clear-sky solar over [(time, observed W, clear-sky W), ...]
+    (sun up only), or None with fewer than 4 observations."""
+    obs = [o for o in obs if o[2] > 20]
+    if len(obs) < 4:
+        return None
+    return sum(o[1] for o in obs) / sum(o[2] for o in obs)
 
 
 def blend(old, new, weight: float):

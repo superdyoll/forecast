@@ -228,13 +228,14 @@ current, ArduPilot made 0.7–0.8 m/s over ground for a 0.3–0.4 m/s command, a
 at a few watts. See [Open issues](#open-issues).
 
 **Fast simulation, the same planner with and without the current estimate**
-(`scout-sim fast`, 0.75–2 days; error at 3 hours):
+(`scout-sim fast`, 0.75–2 days; error at 3 hours; rerun after the code review, which made
+the fast mode estimate the current once a boat minute, as the service does):
 
 | Scenario | Without | With | Stays the same |
 | --- | --- | --- | --- |
-| Transit, seeds 1/2/3 (all on time) | 1.89 / 2.66 / 1.60 | 1.68 / 2.71 / 1.42 | 5.1 / 3.1 / 3.5 |
-| Transit, slow hull (0.3 m/s), bias | −1.44 | −0.55 | 4.5 |
-| Station-keeping, 2 days, bias | +0.55 | +0.37 | 4.3 |
+| Transit, seeds 1/2/3 (all on time) | 1.95 / 2.73 / 1.65 | 1.79 / 2.80 / 1.46 | 5.1 / 3.1 / 3.5 |
+| Transit, slow hull (0.3 m/s), bias | −1.63 | −0.60 | 5.3 |
+| Station-keeping, 2 days, bias | +0.57 | +0.36 | 4.3 |
 
 Over a few hours the gain is modest. The large gains in SITL come from
 what the fast mode's simple boat doesn't have: a hull far slower than the model
@@ -245,13 +246,14 @@ believed.
 `scout-sim fast --mission station --storm 24:72`: five days on station with an
 Atlantic low from day 2 to day 4. Solar falls to 8 % of clear sky. Wind rises to
 20 m/s, which adds about 0.6 m/s of leeway drift on top of the current. A calm
-five days from 70 % never goes below 68.7 %.
+five days from 70 % never goes below 68.7 % (68.65 % on the rerun after the code review).
 
 | Planner | Start 70 %: low / hours below reserve | Start 55 % | Start 40 % | 12 h bias |
 | --- | --- | --- | --- | --- |
 | Before | 0 % / 74 h | 0 % / 81 h | – | +10.6 |
 | Floor bug, drift and Starlink fixed | 27.8 % / 4.5 h | 21.0 % / 27 h | 16.8 % / 36 h | +3.0 |
-| + 48 h look-ahead, bad weather persists 96 h, current relaxes | **31.2 % / 0 h** | 23.4 % / 14 h | 13.9 % / 42 h | +4.1 |
+| + 48 h look-ahead, bad weather persists 96 h, current relaxes | 31.2 % / 0 h | 23.4 % / 14 h | 13.9 % / 42 h | +4.1 |
+| + code review (current estimated every boat minute, as on the boat; station priced at the learnt top speed) | **30.5 % / 0 h** | 23.3 % / 14 h | 14.0 % / 41 h | +4.1 |
 
 The reserve is 30 %. What went wrong first:
 1. **The battery floor didn't stop the motors.** This was the safety bug above.

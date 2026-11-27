@@ -306,7 +306,8 @@ def build(name: str, spec: dict, wheels: dict, version: str, out: Path, tmp: Pat
     summary = ""
     if spec.get("wheel"):
         v, scripts, summary = unpack_wheel(wheels[spec["wheel"]], stage)
-        assert v == version, (name, v, version)
+        if v != version:
+            raise SystemExit(f"{name}: wheel is {v}, expected {version}")
         scripts = {k: launcher(t) for k, t in scripts.items()}
         scripts.update(spec.get("scripts", {}))
         for k, text in scripts.items():
@@ -341,7 +342,7 @@ def build(name: str, spec: dict, wheels: dict, version: str, out: Path, tmp: Pat
         "Recommends": ", ".join(
             d.format(v=version) for d in spec.get("recommends", [])
         ),
-        "Description": spec["description"] + _long(summary),
+        "Description": spec["description"] + (f"\n {summary}" if summary else ""),
     }
     deb = stage / "DEBIAN"
     deb.mkdir(parents=True, exist_ok=True)
@@ -360,10 +361,6 @@ def build(name: str, spec: dict, wheels: dict, version: str, out: Path, tmp: Pat
         stdout=subprocess.DEVNULL,
     )
     return target
-
-
-def _long(summary: str) -> str:
-    return f"\n {summary}" if summary else ""
 
 
 def _put(path: Path, text: str, mode: int = 0o644) -> None:

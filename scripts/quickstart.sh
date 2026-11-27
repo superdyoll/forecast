@@ -9,7 +9,7 @@
 #
 # Running prints one line "READY http://127.0.0.1:8080" once the page is up and
 # the service is planning; then it keeps running (logs follow) until Ctrl-C.
-# The SITL container keeps running after that (docker rm -f scout-sitl).
+# The SITL container may keep running after that (docker rm -f scout-sitl).
 #
 # Needs: Python 3.9+, and docker running (Docker Desktop on macOS/Windows,
 # docker.io on Linux). The first run pulls the ArduPilot SITL image (several

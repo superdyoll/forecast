@@ -54,7 +54,6 @@ class PowerModel:
         self.pct = pct0
         self.volt = 20 + pct0 / 20
         self.rnd = random.Random(seed)
-        self.last = {}
 
     def starlink_on(self, t: datetime) -> bool:
         period = self.t.starlink_period_s
@@ -62,7 +61,8 @@ class PowerModel:
 
     def step(self, t, dt_s, lat, lon, u_water, armed, cloud) -> dict:
         tr = self.t
-        load = tr.hotel_w + (tr.starlink_w if self.starlink_on(t) else 0.0)
+        starlink = self.starlink_on(t)
+        load = tr.hotel_w + (tr.starlink_w if starlink else 0.0)
         prop = 0.0
         if armed:
             prop = tr.esc_idle_w + tr.propulsion_scale * E.propulsion_w(
@@ -76,13 +76,12 @@ class PowerModel:
         )
         v = 20 + self.pct / 20 + self.rnd.gauss(0, tr.volt_noise)
         self.volt = round(v, 2)
-        self.last = {
+        return {
             "load_w": load,
             "prop_w": prop,
             "solar_w": solar,
             "battery_w": net,
             "volt": self.volt,
             "pct": self.pct,
-            "starlink": self.starlink_on(t),
+            "starlink": starlink,
         }
-        return self.last

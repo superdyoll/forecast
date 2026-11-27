@@ -27,9 +27,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .env import csv_arg
-
 from . import energy as E
+from .env import csv_arg
 
 LEADS_H = (1, 3, 6, 12, 24)
 
@@ -84,10 +83,10 @@ def mae(g, origins, preds, horizon):
             continue
         base = g["pct"][i - 1]
         for k in range(horizon):
-            e = abs(pr[k] - (g["pct"][i + k] - base))
-            errs_all.append(e)
-            signed.append(pr[k] - (g["pct"][i + k] - base))
-            by_step[k].append(e)
+            d = pr[k] - (g["pct"][i + k] - base)
+            errs_all.append(abs(d))
+            signed.append(d)
+            by_step[k].append(abs(d))
     rep["all"] = _mean(errs_all)
     rep["bias"] = _mean(signed)
     for h in LEADS_H:
@@ -193,11 +192,9 @@ def main(argv=None) -> int:
 
 
 def _avg(reports):
-    out = {}
-    for k in reports[0]:
-        v = [r[k] for r in reports if r.get(k) is not None]
-        out[k] = sum(v) / len(v) if v else None
-    return out
+    return {
+        k: _mean([r[k] for r in reports if r.get(k) is not None]) for k in reports[0]
+    }
 
 
 def _round(v):

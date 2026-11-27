@@ -27,16 +27,20 @@ Every component is fitted from the telemetry (see REPORT.md):
 from __future__ import annotations
 
 import json
+import logging
 import math
 import statistics
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from .data import load, resample
 
+log = logging.getLogger("scout_forecast")
 STEP_S = 900
 STEP_H = STEP_S / 3600
-STEPS_PER_H = 4
+STEPS_PER_H = 3600 // STEP_S
+NOMINAL_V = 23.5  # battery voltage to assume when none is reported
 UNDER_WAY_MODES = (10, 17)  # AUTO and MODE_17 (looks like station-keeping)
 # Columns that must be present for a step to be usable as forecast
 # input/target.
@@ -366,29 +370,17 @@ def simulate(
     if sinel is None:
         sinel = sin_elevation_series(g, p.solar_offset_h)
     n = len(g["times"])
-    pct0, v0 = g["pct"][i - 1], g["volt"][i - 1] or 23.5
+    pct0, v0 = g["pct"][i - 1], g["volt"][i - 1] or NOMINAL_V
     cf0 = cloud_factor(g, i, sinel, p)
     hold = persist_load(g, i, p)
 
     def solar_at(j, h):
-        if j >= n:
-            t = g["times"][-1] + timedelta(seconds=STEP_S * (j - n + 1))
-            s = max(
-                0.0,
-                math.sin(
-                    math.radians(
-                        sun_elevation(
-                            t + timedelta(seconds=STEP_S / 2, hours=p.solar_offset_h),
-                            g["lat"][-1],
-                            g["lon"][-1],
-                        )
-                    )
-                ),
-            )
-        else:
-            s = sinel[j]
         cf = p.cloud_default + (cf0 - p.cloud_default) * math.exp(-h / p.cloud_tau_h)
-        return p.solar_k * s**p.solar_gamma * cf
+        if j < n:
+            return p.solar_k * sinel[j] ** p.solar_gamma * cf
+        # Beyond the grid: the clock and the last position.
+        mid = g["times"][-1] + timedelta(seconds=STEP_S * (j - n + 1.5))
+        return clear_sky_w(p, mid, g["lat"][-1], g["lon"][-1]) * cf
 
     # Starting rested level: remove the sag/rise present at the last reading.
     if g["battery_w"][i - 1] is not None:
@@ -450,9 +442,29 @@ def fitted_params() -> Params:
     return Params.from_dict(json.loads(text))
 
 
+def load_params(path) -> Params:
+    """params.json at `path`, else (missing, unreadable or None) the shipped fit.
+    Never raises: under systemd a bad file must not crash-loop the planner."""
+    if path:
+        try:
+            return Params.from_dict(json.loads(Path(path).read_text()))
+        except (OSError, ValueError, TypeError) as e:
+            log.error(
+                "can't read energy params %s (%s); using the shipped fit", path, e
+            )
+    return fitted_params()
+
+
 def load_component(p: Params, name: str) -> float:
     v = p.load.get(name)
     return float(v) if v is not None else LOAD_DEFAULTS[name]
+
+
+def base_load_w(p: Params, starlink_duty: float) -> float:
+    """Hotel load plus Starlink at the given duty: everything but propulsion."""
+    return (
+        load_component(p, "hotel_w") + load_component(p, "starlink_w") * starlink_duty
+    )
 
 
 def max_propulsion_w(p: Params) -> float:
@@ -463,11 +475,18 @@ def max_propulsion_w(p: Params) -> float:
     return max(seen) if seen else LOAD_DEFAULTS["max_propulsion_w"]
 
 
+def _cubic_ref(p: Params) -> tuple[float, float]:
+    """The point the propulsion cubic is pinned to: (speed m/s, power W)."""
+    return (
+        max(load_component(p, "auto_sog_median"), 0.1),
+        max(load_component(p, "auto_propulsion_w"), 1e-6),
+    )
+
+
 def stw_for_power(p: Params, watts: float) -> float:
     """Speed through the water that `watts` of propulsion holds: the inverse
     of propulsion_w. Used to read speed through the water off the load."""
-    ref_v = max(load_component(p, "auto_sog_median"), 0.1)
-    ref_w = max(load_component(p, "auto_propulsion_w"), 1e-6)
+    ref_v, ref_w = _cubic_ref(p)
     return ref_v * (max(watts, 0.0) / ref_w) ** (1 / 3)
 
 
@@ -484,8 +503,7 @@ def propulsion_w(p: Params, speed_ms: float) -> float:
     speed-over-ground curve in params is not used directly: it flattens above
     ~0.7 m/s because current, not thrust, adds the extra speed.
     """
-    ref_v = max(load_component(p, "auto_sog_median"), 0.1)
-    ref_w = load_component(p, "auto_propulsion_w")
+    ref_v, ref_w = _cubic_ref(p)
     return ref_w * (max(speed_ms, 0.0) / ref_v) ** 3
 
 
@@ -518,7 +536,7 @@ def project(
     """
     step_h = step_s / 3600
     cf0 = p.cloud_default if cloud is None else cloud
-    v0 = volt0 or 23.5
+    v0 = volt0 or NOMINAL_V
     if net0 is None:
         net0 = clear_sky_w(p, t0, lat, lon) * cf0 - load_fn(0, t0) - p.loss_w
     rest = pct0 - p.sag_pct_per_a * net0 / v0

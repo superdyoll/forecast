@@ -51,6 +51,30 @@ class EnvConfig:
     storm_wind_ms: float = 20.0
 
 
+def env_config(seed: int, storm: str | None, storm_cloud: float) -> EnvConfig:
+    """EnvConfig, with a storm from `storm` = 'START_H:HOURS' if given."""
+    if not storm:
+        return EnvConfig(seed=seed)
+    h0, hours = (float(x) for x in storm.split(":")[:2])
+    return EnvConfig(
+        seed=seed, storm_start_h=h0, storm_hours=hours, storm_cloud=storm_cloud
+    )
+
+
+def add_storm_args(ap) -> None:
+    ap.add_argument(
+        "--storm",
+        metavar="START_H:HOURS",
+        help="overcast and gales from START_H for HOURS (24:72: day 2, for 3 days)",
+    )
+    ap.add_argument(
+        "--storm-cloud",
+        type=float,
+        default=0.08,
+        help="fraction of clear-sky solar under the storm",
+    )
+
+
 class Environment:
     def __init__(self, cfg: EnvConfig, start: datetime):
         self.cfg, self.start = cfg, start

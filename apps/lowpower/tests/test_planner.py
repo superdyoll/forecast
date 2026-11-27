@@ -180,6 +180,15 @@ class StationDecisions(unittest.TestCase):
         p = decide(state(60), self.station(), PARAMS)
         self.assertEqual(p.action, "hold")
 
+    def test_holding_is_priced_at_the_learnt_top_speed(self):
+        # A 0.8 m/s current, but the hull is known to manage only 0.3 m/s
+        # through the water: holding can't draw more than that speed costs.
+        strong = dict(current_ms=(0.8, 0.0), current_mean_ms=(0.8, 0.0))
+        model = decide(state(80, **strong), self.station(), PARAMS)
+        learnt = decide(state(80, stw_max_ms=0.3, **strong), self.station(), PARAMS)
+        self.assertEqual(model.action, "drift")  # stemming 0.8 m/s: unaffordable
+        self.assertEqual(learnt.action, "hold")  # 0.3 m/s worth: affordable
+
     def test_drifts_with_motors_off_when_holding_is_unaffordable(self):
         # Stemming a 0.8 m/s current takes ~50 W: too much at night with 34 %.
         tight = state(34, t=T0.replace(hour=21), cloud=0.1, current_ms=(0.8, 0.0))
@@ -196,7 +205,7 @@ class StationDecisions(unittest.TestCase):
         )  # ~1.1 km away
         far_plan = decide(far, self.station(), PARAMS)
         self.assertEqual(far_plan.action, "drift")
-        self.assertFalse(far_plan.returning)  # holding again brings it back
+        self.assertIsNone(far_plan.speed_ms)  # motors off; holding again brings it back
 
     def test_below_the_floor_never_motors_back(self):
         far = BoatState(
@@ -204,7 +213,7 @@ class StationDecisions(unittest.TestCase):
         )  # ~1.1 km away, below reserve 30 - floor 3
         p = decide(far, self.station(), PARAMS)
         self.assertEqual(p.action, "drift")
-        self.assertFalse(p.returning)
+        self.assertIsNone(p.speed_ms)  # motors off
 
     def test_nothing_affordable_means_motors_off(self):
         far = BoatState(
@@ -219,7 +228,7 @@ class StationDecisions(unittest.TestCase):
         p = decide(far, self.station(), PARAMS)
         self.assertEqual(p.action, "drift")
         self.assertFalse(p.feasible)
-        self.assertFalse(p.returning)
+        self.assertIsNone(p.speed_ms)  # motors off
 
     def test_no_futile_return_against_a_gale(self):
         far = BoatState(
@@ -233,7 +242,7 @@ class StationDecisions(unittest.TestCase):
         )
         p = decide(far, self.station(), PARAMS)
         self.assertEqual(p.action, "drift")
-        self.assertFalse(p.returning)
+        self.assertIsNone(p.speed_ms)  # motors off
 
     def test_bad_weather_is_assumed_to_persist(self):
         m = self.station()

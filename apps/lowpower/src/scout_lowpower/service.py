@@ -14,7 +14,8 @@ Robustness:
     one it uploaded (re-uploading if different), re-asserts mode and speed,
     and re-arms if the boat was armed before (--no-rearm to disable).
   * Service restart: state.json (atomic writes) holds the last plan, the
-    mission it uploaded and the learned cloud and load factors.
+    mission it uploaded, the cloud observations, and the estimated current
+    and top speed through the water.
   * Operator override: if someone switches the autopilot to a mode the
     service doesn't use (MANUAL, RTL, GUIDED...), it stops commanding until
     the mode is back in AUTO/HOLD/LOITER or a new mission is set.
@@ -48,6 +49,15 @@ from .mission import load as load_mission
 log = logging.getLogger("scout_lowpower")
 
 SERVICE_MODES = (M.MODE_AUTO, M.MODE_HOLD, M.MODE_LOITER)
+# The mode each action settles in. Transit (AUTO) and station-keeping
+# (LOITER: AUTO reaching the final loiter item) both motor; in LOITER the boat
+# points into the current, so the same estimate applies.
+PLAN_MODES = {
+    "transit": M.MODE_AUTO,
+    "hold": M.MODE_LOITER,
+    "pause": M.MODE_HOLD,
+    "drift": M.MODE_HOLD,
+}
 HEARTBEAT_TIMEOUT_S = 5.0
 REBOOT_GRACE_S = 60.0  # after a restart, the autopilot's own mode isn't an override
 # After a reconnect, how long to wait for the boot clock (GLOBAL_POSITION_INT)
@@ -80,9 +90,8 @@ class Settings:
     solar_id: int = 2
     pct_zero_v: float = 20.0  # Tether's battery_pct = (V - 20) * 20
     pct_full_v: float = 25.0
-    battery_current_sign: float = (
-        -1.0
-    )  # ArduPilot: + = discharging; we use + = charging
+    # ArduPilot: + = discharging; we use + = charging.
+    battery_current_sign: float = -1.0
 
     @property
     def mission_path(self) -> Path:
@@ -103,7 +112,6 @@ class Telemetry:
         self.mission_seq = None
         self.sog = None
         self.ground = deque()  # (monotonic t, north m/s, east m/s) over ground
-        self.heading = None  # degrees, from VFR_HUD
         self.headings = deque()  # (monotonic t, unit north, unit east)
 
     def update(self, msg: dict, now: float) -> None:
@@ -128,28 +136,35 @@ class Telemetry:
                 if amps is not None:
                     self.battery_w = self.st.battery_current_sign * amps * v
             elif msg["id"] == self.st.load_id and amps is not None:
-                self.load.append((now, abs(amps) * (v or self.volt or 23.5)))
+                self.load.append((now, abs(amps) * (v or self.volt or E.NOMINAL_V)))
             elif msg["id"] == self.st.solar_id and amps is not None and v:
                 self.solar.append((now, abs(amps) * v))
         elif n == "MISSION_CURRENT":
             self.mission_seq = msg["seq"]
         elif n == "VFR_HUD":
             self.sog = msg["groundspeed"]
-            self.heading = msg["heading"]
             h = math.radians(msg["heading"])
             self.headings.append((now, math.cos(h), math.sin(h)))
+        # Keep what the longest window needs: a whole Starlink cycle
+        # (_observe_current), at least 15 min.
+        keep = max(900.0, self.st.starlink_period_s)
         for q in (self.load, self.solar, self.ground, self.headings):
-            while q and now - q[0][0] > 900:
+            while q and now - q[0][0] > keep:
                 q.popleft()
 
+    @staticmethod
+    def _window(q, window_s: float, now: float):
+        """The values (without their time) of entries in the last window_s."""
+        return [x[1:] for x in q if now - x[0] <= window_s]
+
     def mean(self, q, window_s: float, now: float):
-        v = [w for t, w in q if now - t <= window_s]
+        v = [w for (w,) in self._window(q, window_s, now)]
         return sum(v) / len(v) if v else None
 
     def mean_heading(self, window_s: float, now: float):
         """Heading over the window as a vector mean (degrees), or None. The
         window spans turns at waypoints: the last heading would misread it."""
-        v = [(n, e) for t, n, e in self.headings if now - t <= window_s]
+        v = self._window(self.headings, window_s, now)
         if not v:
             return None
         n, e = sum(x[0] for x in v), sum(x[1] for x in v)
@@ -158,7 +173,7 @@ class Telemetry:
         return math.degrees(math.atan2(e, n)) % 360
 
     def ground_velocity(self, window_s: float, now: float):
-        v = [(n, e) for t, n, e in self.ground if now - t <= window_s]
+        v = self._window(self.ground, window_s, now)
         if not v:
             return None
         return sum(x[0] for x in v) / len(v), sum(x[1] for x in v) / len(v)
@@ -228,6 +243,13 @@ class Autopilot:
             self.boot_unknown_since = None
         return events
 
+    def restarted_recently(self, now: float) -> bool:
+        """Within REBOOT_GRACE_S of a restart: its own mode isn't an override,
+        and its "disarmed" isn't the operator's."""
+        return (
+            self.restarted_at is not None and now - self.restarted_at < REBOOT_GRACE_S
+        )
+
     def check_timeout(self, now: float) -> bool:
         if self.online and self.last_hb and now - self.last_hb > HEARTBEAT_TIMEOUT_S:
             self.online = False
@@ -293,8 +315,8 @@ class Service:
         self.uploaded = d.get("uploaded")
         self.cloud_obs = d.get("cloud_obs", [])
         self.current = tuple(d.get("current") or (0.0, 0.0))
-        self.stw_max = d.get("stw_max")
         self.current_mean = tuple(d.get("current_mean") or (0.0, 0.0))
+        self.stw_max = d.get("stw_max")
         self.was_armed = d.get("was_armed", False)
         self.override = d.get("override", False)
         if d.get("plan"):
@@ -315,8 +337,8 @@ class Service:
             "uploaded": self.uploaded,
             "cloud_obs": self.cloud_obs[-200:],
             "current": list(self.current),
-            "stw_max": self.stw_max,
             "current_mean": list(self.current_mean),
+            "stw_max": self.stw_max,
             "was_armed": self.was_armed,
             "override": self.override,
             "plan": self.plan.to_dict() if self.plan else None,
@@ -350,7 +372,6 @@ class Service:
             },
             "stw_max_ms": None if self.stw_max is None else round(self.stw_max, 3),
             "cloud": self._cloud(),
-            "starlink_advice": self.plan and self.plan.starlink_duty,
             "state": s
             and {
                 "time": s.time.isoformat(),
@@ -474,11 +495,7 @@ class Service:
             self._check_mission_file()
         if self.ap.online:
             self._track_mode(now)
-            in_grace = (
-                self.ap.restarted_at is not None
-                and now - self.ap.restarted_at < REBOOT_GRACE_S
-            )
-            if not in_grace and not self.ap.boot_unknown(now):
+            if not self.ap.restarted_recently(now) and not self.ap.boot_unknown(now):
                 # Follows the operator; frozen just after a restart, and after
                 # a reconnect until the boot clock says whether it rebooted.
                 self.was_armed = self.ap.armed
@@ -567,12 +584,8 @@ class Service:
                     return
             else:
                 self.uploaded = onboard
-            restarted = (
-                self.ap.restarted_at is not None
-                and now - self.ap.restarted_at < REBOOT_GRACE_S
-            )
             if (
-                restarted
+                self.ap.restarted_recently(now)
                 and self.st.rearm
                 and self.was_armed
                 and not self.ap.armed
@@ -673,27 +686,14 @@ class Service:
         return False
 
     def _command(self, cmd, *params):
-        p = list(params) + [0.0] * (7 - len(params))
-        self.link.send(
-            "COMMAND_LONG",
-            command=cmd,
-            confirmation=0,
-            **{f"param{i + 1}": float(v) for i, v in enumerate(p)},
-            **self._target(),
-        )
+        self.link.command(self._target(), cmd, *params)
 
     def _param(self, name: str, value: float):
-        self.link.send(
-            "PARAM_SET",
-            param_id=name,
-            param_value=float(value),
-            param_type=M.MAV_PARAM_TYPE_REAL32,
-            **self._target(),
-        )
+        self.link.param_set(self._target(), name, value)
 
     # -- observe / decide / enforce -----------------------------------------
     def _observe(self, now):
-        """Learn the cloud factor (solar) and load factor (propulsion)."""
+        """Learn the cloud factor (solar) and the water current."""
         t = self.tel
         if t.lat is None:
             return
@@ -719,40 +719,27 @@ class Service:
         ground = t.ground_velocity(window, now)
         if ground is None:
             return
-        # Transit (AUTO) and station-keeping (LOITER) both motor; in LOITER the
-        # boat points into the current, so the same estimate applies.
-        heading = t.mean_heading(window, now)
-        motoring = (
-            (
-                (pl.action == "transit" and self.ap.mode == M.MODE_AUTO)
-                or (pl.action == "hold" and self.ap.mode == M.MODE_LOITER)
-            )
-            and self.ap.armed
-            and heading is not None
+        load = t.mean(t.load, window, now)
+        obs = C.observe(
+            self.params,
+            pl.action,
+            pl.starlink_duty,
+            self.ap.mode == PLAN_MODES.get(pl.action),
+            self.ap.armed,
+            ground,
+            t.mean_heading(window, now),
+            load,
         )
-        drifting = (
-            pl.action in ("pause", "drift")
-            and not pl.returning
-            and (self.ap.mode == M.MODE_HOLD or not self.ap.armed)
-        )
-        if motoring:
-            load = t.mean(t.load, window, now)
-            if load is None:
-                return
-            base = (
-                E.load_component(self.params, "hotel_w")
-                + E.load_component(self.params, "starlink_w") * pl.starlink_duty
-            )
-            obs = C.from_thrust(self.params, ground, heading, load - base)
-            if pl.action == "transit" and pl.speed_ms:
-                stw = E.stw_for_power(self.params, load - base)
-                self.stw_max = C.learn_top_speed(
-                    self.stw_max, pl.speed_ms, math.hypot(*ground), stw
-                )
-        elif drifting:
-            obs = C.from_drift(ground)
-        else:
+        if obs is None:
             return
+        if pl.action == "transit" and pl.speed_ms and self.ap.armed:
+            prop = load - E.base_load_w(self.params, pl.starlink_duty)
+            self.stw_max = C.learn_top_speed(
+                self.stw_max,
+                pl.speed_ms,
+                math.hypot(*ground),
+                E.stw_for_power(self.params, prop),
+            )
         self.current = C.blend(self.current, obs, 0.3)
         # Observed about once a boat minute: a ~24 h average of the same.
         self.current_mean = C.blend(self.current_mean, obs, 60.0 / 86400)
@@ -763,10 +750,7 @@ class Service:
         )
 
     def _cloud(self):
-        obs = [o for o in self.cloud_obs if o[2] > 20]
-        if len(obs) < 4:
-            return None
-        return sum(o[1] for o in obs) / sum(o[2] for o in obs)
+        return C.cloud_factor(self.cloud_obs)
 
     def _state(self, now) -> P.BoatState | None:
         t = self.tel
@@ -780,8 +764,6 @@ class Service:
         ):
             # Items: 0 home, 1..n waypoints, n+1 loiter at the last one.
             next_wp = min(max(t.mission_seq - 1, 0), len(self.mission.waypoints) - 1)
-            if t.mission_seq > len(self.mission.waypoints):
-                next_wp = len(self.mission.waypoints) - 1
         return P.BoatState(
             time=_now(),
             lat=t.lat,
@@ -817,7 +799,6 @@ class Service:
         msg = (
             f"plan: {new.action}"
             + (f" {new.speed_ms:.1f} m/s" if new.speed_ms else "")
-            + (" (returning)" if new.returning else "")
             + f", starlink duty {new.starlink_duty:.2f}, battery {s.battery_pct:.1f}%"
             + f", forecast low {new.min_pct:.1f}%"
             + (f", ETA {new.eta:%m-%d %H:%MZ}" if new.eta else "")
@@ -836,12 +817,8 @@ class Service:
         self._publish(s)
 
     def _desired_mode(self):
-        pl = self.plan
-        if pl.action == "transit" or pl.action == "hold":
-            return M.MODE_AUTO
-        if pl.action == "drift" and pl.returning:
-            return M.MODE_AUTO
-        return M.MODE_HOLD
+        # hold = AUTO: the mission ends in LOITER_UNLIM at the station.
+        return M.MODE_AUTO if self.plan.action in ("transit", "hold") else M.MODE_HOLD
 
     def _track_mode(self, now):
         """Detect operator overrides.
@@ -903,9 +880,8 @@ class Service:
         if pl.action in ("hold", "drift") and self._every("loiter_radius", 3600.0, now):
             self._param("LOIT_RADIUS", self.mission.radius_m)
         if self.st.starlink_relay is not None and self._every("relay", 60.0, now):
-            phase = (
-                time.time() % self.st.starlink_period_s
-            ) / self.st.starlink_period_s
+            period = self.st.starlink_period_s  # boat seconds, as power.py
+            phase = (_now().timestamp() % period) / period
             on = phase < pl.starlink_duty
             self._command(
                 M.MAV_CMD_DO_SET_RELAY, self.st.starlink_relay, 1 if on else 0
@@ -919,8 +895,6 @@ class Service:
 
 
 def _signature(items):
-    if items is None:
-        return None
     return [
         [int(c), round(la, 6), round(lo, 6), round(float(p3), 1)]
         for c, la, lo, p3 in items[1:]
