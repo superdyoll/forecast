@@ -60,13 +60,29 @@ Settings: flags, else `SCOUT_MAVLINK`, `SCOUT_STATE_DIR` (or systemd's
 ## Install on the boat (Debian/Ubuntu, apt)
 
 Every release (see [Releases](#releases)) publishes one deb per app and the
-apt index for them. Copy the release's files to the boat (no network needed:
-the only dependencies, `python3` and `adduser`, are on every Debian), then:
+apt index for them. Download the latest release's boat debs (`scout` is a
+metapackage, so it needs the three it depends on):
 
 ```sh
-echo "deb [trusted=yes] file:/srv/scout ./" | sudo tee /etc/apt/sources.list.d/scout.list
-sudo apt update && sudo apt install scout     # forecast + lowpower + web; units start
-# or, without the index:  sudo apt install ./scout*_0.1.5_all.deb
+repo=https://github.com/superdyoll/forecast
+# /releases/latest redirects to the newest tag, e.g. .../releases/tag/v0.1.1
+tag="$(curl -fsSLo /dev/null -w '%{url_effective}' "$repo/releases/latest")"
+tag="${tag##*/}"; version="${tag#v}"
+mkdir -p "scout-$version" && cd "scout-$version"
+for p in scout scout-forecast scout-lowpower scout-web; do
+  curl -fsSLO "$repo/releases/download/$tag/${p}_${version}_all.deb"
+done
+```
+
+Install them on the boat. If the boat has no network, download on shore and
+copy the folder across: the only dependencies, `python3` and `adduser`, are on
+every Debian.
+
+```sh
+sudo apt install ./scout*_"$version"_all.deb  # forecast + lowpower + web; units start
+# or from a copy of all the release's files (debs + Packages + Release):
+#   echo "deb [trusted=yes] file:/srv/scout ./" | sudo tee /etc/apt/sources.list.d/scout.list
+#   sudo apt update && sudo apt install scout
 sudo cp params.json /etc/scout/params.json    # energy model from scout-evaluate
 sudoedit /etc/scout/scout.env                 # SCOUT_MAVLINK etc.; kept across upgrades
 sudo systemctl restart scout-lowpower
