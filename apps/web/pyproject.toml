@@ -9,7 +9,7 @@ dynamic = ["version"]
 description = "Forecast-against-actual web page for Scout (standard-library server, no external assets)"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["scout-forecast"]  # hindcasts; otherwise standard library only
+dependencies = ["scout-forecast==0.1.0"]  # hindcasts; otherwise standard library only
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: POSIX :: Linux",

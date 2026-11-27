@@ -1,9 +1,10 @@
-# A throwaway Debian with systemd as PID 1, for testing packaging/install.sh,
-# rollback.sh and the units on a non-Linux dev machine. See test-systemd.sh.
+# A throwaway Debian with systemd as PID 1, for testing the debs and their
+# units (packaging/test/smoke.sh). No python3 or adduser: installing the debs
+# must pull those in as dependencies.
 FROM debian:bookworm
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      systemd systemd-sysv dbus python3 python3-venv python3-pip curl procps iproute2 \
+      systemd systemd-sysv dbus curl ca-certificates procps \
     && rm -rf /var/lib/apt/lists/*
 # IMPORTANT: this container runs privileged and shares the Docker VM's kernel.
 # systemd-binfmt would clear the VM's binfmt_misc handlers at boot, which

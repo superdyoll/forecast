@@ -1,8 +1,7 @@
-# Scout low-power mission mode. Installed by packaging/install.sh, which
-# replaces @PREFIX@ and @ETC@.
+# Scout low-power mission mode. Shipped in the scout-lowpower deb.
 [Unit]
 Description=Scout low-power mission mode (energy forecast + ArduPilot control)
-Documentation=file:@PREFIX@/current/share/scout/README.md
+Documentation=file:/usr/share/doc/scout-lowpower/README.md
 After=network.target
 # Never give up: on a boat there is nobody to type "systemctl reset-failed".
 StartLimitIntervalSec=0
@@ -10,8 +9,8 @@ StartLimitIntervalSec=0
 [Service]
 Type=notify
 NotifyAccess=main
-EnvironmentFile=-@ETC@/scout.env
-ExecStart=@PREFIX@/current/bin/scout-lowpower run
+EnvironmentFile=-/etc/scout/scout.env
+ExecStart=/usr/bin/scout-lowpower run
 User=scout
 Group=scout
 # Mission, state.json, decision.json, history.jsonl live here ($STATE_DIRECTORY).

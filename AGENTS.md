@@ -44,7 +44,8 @@ inputs and may not exist in a fresh clone.
 | `apps/web/` | **`scout-web`** (`scout_web`, stdlib + scout-forecast): `server.py` + `static/index.html`, forecast vs actual page (no external assets, localhost by default). Reads the service's `decision.json` / `history.jsonl`; `/api/hindcast` forecasts past periods from the CSV. |
 | `apps/sim/` | **`scout-sim`** (never on the boat): environment (current, wind, cloud) pushed into ArduPilot 4.0 SITL as `SIM_TIDE` drift, and a power model publishing `BATTERY_STATUS` to the service's `--power-link`. `apps/sim/run_sitl.sh` runs SITL (docker `radarku/ardupilot-sitl`) + sim + service + web. |
 | `model/lstm/train_lstm.py` | Experiment, not an app. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. No app may import or mention it. Needs scout-forecast plus `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
-| `packaging/` | Installs the forecast, lowpower and web wheels (plus sim with `--with-sim`) as one release. systemd units (`scout-lowpower` notify+watchdog, `scout-web`, simulation-only `scout-sitl` and `scout-sim`), `install.sh` (versioned releases in `/opt/scout/releases`, atomic `current` symlink, `/etc/scout/scout.env`, operator wrapper), `rollback.sh`. Unit paths are `@PREFIX@`/`@ETC@` templates filled by `install.sh`. |
+| `packaging/` | **Debs, installed with apt.** `build.sh` builds the wheels and, from them, `deb/build_debs.py` builds `scout-forecast`, `scout-lowpower`, `scout-web`, `scout-sim` and the `scout` metapackage (code in `/usr/lib/python3/dist-packages`, units in `/usr/lib/systemd/system`, `/etc/scout/scout.env` conffile, generated maintainer scripts) plus a flat apt repository. `systemd/` has the units (`scout-lowpower` notify+watchdog, `scout-web`, simulation-only `scout-sitl` and `scout-sim`). `version.py` keeps every app at one version. `test/smoke.sh` installs the debs under systemd in a container and checks them (~1 min). |
+| `.github/workflows/release.yml` | Runs only on pushes to `main`: bump patch version of every app, unit tests, build, smoke test (with upgrade from the previous release), then push `Release vX.Y.Z [skip ci]` + tag and publish a GitHub release. |
 
 Update this table when you add components.
 
@@ -60,10 +61,15 @@ Update this table when you add components.
   file names, no repo location (`Path(__file__).parents[...]`), no `sys.path` edits.
   Take inputs via `--csv` / `SCOUT_TELEMETRY_CSV` (`scout_forecast.env.csv_arg`,
   which also reads a gitignored `.env`; shell variables win), and write outputs
-  relative to the current directory. Boat-side code goes in an app under `apps/`
+  relative to the current directory. Fixed install paths (`/usr/bin`,
+  `/etc/scout`, `/var/lib/scout-lowpower`) belong only in `packaging/` (units,
+  debs). Boat-side code goes in an app under `apps/`
   and is exposed through `[project.scripts]` in that app's `pyproject.toml`.
 - A new app gets its own folder in `apps/`, depends only on apps below it, and is
-  added to `requirements-dev.txt` and (if it goes on the boat) `packaging/install.sh`.
+  added to `requirements-dev.txt`, `packaging/build.sh` and (as a deb)
+  `PACKAGES` in `packaging/deb/build_debs.py`.
+- **Versions:** never edit `__version__` or the `==` pins by hand; CI bumps them
+  on every merge into `main`. Use `packaging/version.py set X.Y.Z` if you must.
 
 ## Commands
 
@@ -71,7 +77,8 @@ Update this table when you add components.
 # Install every app, editable (needs pip >= 21.3; macOS's system pip 21.2
 # builds "UNKNOWN" wheels, so use a venv with a current pip)
 pip install -r requirements-dev.txt
-pip wheel --no-deps -w dist apps/forecast apps/lowpower apps/web   # wheels for the boat
+packaging/build.sh                   # wheels + debs + apt index in ./dist (see README)
+packaging/test/smoke.sh              # install the debs under systemd in docker, ~1 min
 
 # The CSV path is never built in: pass --csv or set SCOUT_TELEMETRY_CSV.
 # Outputs go under ./runs/ (gitignored).

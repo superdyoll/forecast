@@ -209,3 +209,20 @@ class FakeRover:
                 target_system=255,
                 target_component=191,
             )
+
+
+if __name__ == "__main__":
+    # Standalone, for the package smoke test: python3 fake_autopilot.py [PORT]
+    import sys
+
+    rover = FakeRover(port=int(sys.argv[1]) if len(sys.argv) > 1 else 5760).start()
+    rover.armed = True
+    print(f"fake rover on tcp:127.0.0.1:{rover.port}", flush=True)
+    last = None
+    while True:  # log state changes, so the test can read them from the journal
+        time.sleep(0.5)
+        with rover.lock:
+            now = f"mode={rover.mode} armed={rover.armed} items={len(rover.mission)}"
+        if now != last:
+            print(now, flush=True)
+            last = now

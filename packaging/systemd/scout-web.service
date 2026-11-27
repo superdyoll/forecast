@@ -1,18 +1,18 @@
-# Scout forecast-vs-actual web page. Installed by packaging/install.sh.
+# Scout forecast-vs-actual web page. Shipped in the scout-web deb.
 [Unit]
 Description=Scout forecast-vs-actual web page
-Documentation=file:@PREFIX@/current/share/scout/README.md
+Documentation=file:/usr/share/doc/scout-web/README.md
 After=network.target scout-lowpower.service
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-EnvironmentFile=-@ETC@/scout.env
+EnvironmentFile=-/etc/scout/scout.env
 # Reads what scout-lowpower writes; never writes there.
 # A path, not a secret (detect-secrets flags it as Base64-like):
 # pragma: allowlist nextline secret
 Environment=SCOUT_STATE_DIR=/var/lib/scout-lowpower
-ExecStart=@PREFIX@/current/bin/scout-web
+ExecStart=/usr/bin/scout-web
 User=scout
 Group=scout
 Restart=always

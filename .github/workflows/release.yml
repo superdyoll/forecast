@@ -1,0 +1,133 @@
+# Release on every merge into main:
+#   1. bump the patch version of every app (packaging/version.py, lockstep)
+#   2. run the unit tests on Python 3.9 (the project target)
+#   3. build the wheels and debs (packaging/build.sh) and an apt repository
+#   4. smoke-test the debs under systemd (packaging/test/smoke.sh), including
+#      an apt upgrade from the previous release
+#   5. only if all of that passed: push "Release vX.Y.Z [skip ci]" to main, tag
+#      it, and publish a GitHub release with the debs, apt index and wheels
+#
+# Manual runs (Actions > release > Run workflow) can bump minor or major.
+# If main is protected against direct pushes, add a RELEASE_TOKEN secret (a
+# fine-grained token or app token allowed to bypass the rule, contents: write).
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version part to bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+# One release at a time, in order: each run starts from the previous run's
+# version commit. (GitHub keeps at most one run waiting; if several merges
+# land during a release, the next release covers all of them.)
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the version commit and tag, create the release
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main # the tip, including the last release commit
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Bump the version of every app
+        id: version
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
+        run: |
+          previous="$(python packaging/version.py)"
+          version="$(python packaging/version.py bump "$BUMP")"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "::notice::releasing $version (was $previous)"
+
+      - name: Install the apps
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet -r requirements-dev.txt
+
+      - name: Unit tests
+        run: |
+          for d in apps/*/tests; do
+            echo "== $d"
+            python -m unittest discover -s "$d"
+          done
+
+      - name: Build wheels, debs and the apt repository
+        env:
+          PYTHON: python
+        run: packaging/build.sh dist
+
+      - name: Fetch the previous release for the upgrade test
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS: ${{ steps.version.outputs.previous }}
+        run: |
+          if gh release download "v$PREVIOUS" --dir dist/previous \
+              --pattern '*.deb' --pattern 'Packages*' --pattern 'Release'; then
+            echo "PREVIOUS=dist/previous" >> "$GITHUB_ENV"
+          else
+            echo "::notice::no release v$PREVIOUS: skipping the upgrade test"
+          fi
+
+      - name: Smoke test the debs under systemd
+        env:
+          EXPECT_VERSION: ${{ steps.version.outputs.version }}
+        run: packaging/test/smoke.sh dist/debs
+
+      - name: Keep the build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scout-${{ steps.version.outputs.version }}
+          path: |
+            dist/debs
+            dist/wheels
+          if-no-files-found: ignore
+
+      - name: Push the version commit and tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/*/pyproject.toml apps/*/src/*/__init__.py
+          git commit -m "Release v$VERSION [skip ci]"
+          # A merge may have landed while this ran: replay the version commit
+          # on top. That merge's own run (queued) releases it next.
+          pushed=""
+          for _ in 1 2 3; do
+            if git push origin HEAD:main; then pushed=1; break; fi
+            git pull --rebase origin main
+          done
+          [ -n "$pushed" ] || { echo "::error::could not push the version commit"; exit 1; }
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" --title "v$VERSION" --generate-notes \
+            dist/debs/*.deb dist/debs/Packages dist/debs/Packages.gz dist/debs/Release \
+            dist/wheels/*.whl

@@ -19,9 +19,11 @@ Each app in `apps/` is its own wheel. Dependencies only point down the table.
 ## Install
 
 ```sh
-pip install -r requirements-dev.txt                               # all apps, editable (pip >= 21.3)
-pip wheel --no-deps -w dist apps/forecast apps/lowpower apps/web  # wheels for the boat
+pip install -r requirements-dev.txt     # development: all apps, editable (pip >= 21.3)
+packaging/build.sh                      # dist/wheels/*.whl, dist/debs/*.deb + apt index
 ```
+
+On the boat, install the debs with apt (next section).
 
 ## Configure
 
@@ -55,18 +57,39 @@ power relay. Decisions, reasons and forecasts go to the log (journald) and to
 Settings: flags, else `SCOUT_MAVLINK`, `SCOUT_STATE_DIR` (or systemd's
 `$STATE_DIRECTORY`), `SCOUT_MISSION`, `SCOUT_PARAMS`, also read from `.env`.
 
-## Install as systemd services (Linux)
+## Install on the boat (Debian/Ubuntu, apt)
+
+Every release (see [Releases](#releases)) publishes one deb per app and the
+apt index for them. Copy the release's files to the boat (no network needed:
+the only dependencies, `python3` and `adduser`, are on every Debian), then:
 
 ```sh
-pip wheel --no-deps -w dist apps/forecast apps/lowpower apps/web  # on shore
-sudo packaging/install.sh --wheels dist --params params.json   # on the boat (no network)
-sudo packaging/install.sh --with-sim                 # demo machine: + SITL (docker) + scout-sim
-scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --reserve 30
-systemctl status scout-lowpower scout-web
+echo "deb [trusted=yes] file:/srv/scout ./" | sudo tee /etc/apt/sources.list.d/scout.list
+sudo apt update && sudo apt install scout     # forecast + lowpower + web; units start
+# or, without the index:  sudo apt install ./scout*_0.1.5_all.deb
+sudo cp params.json /etc/scout/params.json    # energy model from scout-evaluate
+sudoedit /etc/scout/scout.env                 # SCOUT_MAVLINK etc.; kept across upgrades
+sudo systemctl restart scout-lowpower
+sudo -u scout scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --reserve 30
+scout-lowpower status
 journalctl -u scout-lowpower -f
-sudo packaging/rollback.sh --list                    # releases; * = current
-sudo packaging/rollback.sh                           # back to the previous release
 ```
+
+| Package | Contents |
+| --- | --- |
+| `scout` | metapackage for the boat: the three below, at the same version |
+| `scout-forecast` | `forecast`, `scout-data`, `scout-evaluate`; the energy model |
+| `scout-lowpower` | `scout-lowpower`, `scout-lowpower.service`, `/etc/scout/scout.env` (conffile), the `scout` system user |
+| `scout-web` | `scout-web`, `scout-web.service` |
+| `scout-sim` | simulation only, never on the boat: `scout-sim`, `scout-sitl.service` (SITL in docker, started only if docker is installed), `scout-sim.service`, `/etc/scout/sim.env`; drop-ins put the boat units on the simulated clock |
+
+The packages pin each other with `(= version)`, so apt never mixes releases.
+Code goes in `/usr/lib/python3/dist-packages` (pure Python, standard library
+only: no venv needed), units in `/usr/lib/systemd/system`. A fresh install
+enables and starts the units; an upgrade restarts those that were running and
+keeps your `scout.env` edits; `apt purge` removes config and state
+(`/var/lib/scout-lowpower`). To roll back, install the older release's debs:
+`sudo apt install --allow-downgrades ./scout*_0.1.4_all.deb`.
 
 | Unit | Runs | Notes |
 | --- | --- | --- |
@@ -75,10 +98,27 @@ sudo packaging/rollback.sh                           # back to the previous rele
 | `scout-sitl.service` | simulation: SITL in docker | restarting keeps the container, so SITL keeps its mission like a real autopilot |
 | `scout-sim.service` | simulation: sea, sky, power | feeds `BATTERY_STATUS` to the service's power link |
 
-Every install is a new release in `/opt/scout/releases/`, and `/opt/scout/current`
-switches atomically only after the new release has been checked to run.
-Rollback switches the symlink back and restarts. Config (`/etc/scout/scout.env`,
-`params.json`) and state are kept across releases.
+## Releases
+
+`.github/workflows/release.yml` runs on every push to `main` (each merged pull
+request) and nowhere else. It bumps the patch version of every app together
+(`packaging/version.py bump patch`), runs the unit tests on Python 3.9, builds
+the wheels and debs (`packaging/build.sh`), and smoke-tests the debs under
+systemd (`packaging/test/smoke.sh`: install via apt, upgrade from the previous
+release, drive a fake autopilot, `kill -9`, add and purge `scout-sim`, purge
+everything). Only if all of that passes does it push `Release vX.Y.Z [skip ci]`
+to `main`, tag `vX.Y.Z`, and publish a GitHub release with the debs, the apt
+index and the wheels. Run it by hand (Actions > release) to bump minor or major.
+If `main` is protected, give it a `RELEASE_TOKEN` secret that may push there.
+
+Locally (Docker; on macOS the debs are built in a Debian container):
+
+```sh
+packaging/version.py                              # current version (all apps agree)
+PYTHON=.venv/bin/python packaging/build.sh        # dist/
+packaging/test/smoke.sh                           # ~1 min; KEEP=1 leaves scout-smoke running
+PREVIOUS=old/debs packaging/test/smoke.sh         # also test the upgrade from old/debs
+```
 
 ## Simulation (ArduPilot SITL) and web page
 

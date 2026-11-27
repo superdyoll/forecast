@@ -6,13 +6,16 @@ build-backend = "setuptools.build_meta"
 # energy equations and scout-lowpower for the MAVLink codec.
 [project]
 name = "scout-sim"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Environment (current, wind, cloud) and power simulation around ArduPilot SITL for scout-forecast"
 requires-python = ">=3.9"
-dependencies = ["scout-forecast", "scout-lowpower"]
+dependencies = ["scout-forecast==0.1.0", "scout-lowpower==0.1.0"]
 
 [project.scripts]
 scout-sim = "scout_sim.run:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "scout_sim.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

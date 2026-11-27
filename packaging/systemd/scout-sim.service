@@ -1,5 +1,7 @@
 # SIMULATION ONLY: sea (current, wind), sky (sun, cloud) and Scout's power
 # system around SITL. Feeds BATTERY_STATUS to scout-lowpower's power link.
+# Shipped in the scout-sim deb, which also puts the boat units on the
+# simulated clock (drop-ins reading /etc/scout/sim.env).
 [Unit]
 Description=Scout simulation: environment and power system around SITL
 After=scout-sitl.service
@@ -8,8 +10,9 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-EnvironmentFile=-@ETC@/scout.env
-ExecStart=@PREFIX@/current/bin/scout-sim run --arm --truth /var/lib/scout-sim/sim-truth.jsonl
+EnvironmentFile=-/etc/scout/scout.env
+EnvironmentFile=-/etc/scout/sim.env
+ExecStart=/usr/bin/scout-sim run --arm --truth /var/lib/scout-sim/sim-truth.jsonl
 User=scout
 Group=scout
 StateDirectory=scout-sim
