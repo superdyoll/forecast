@@ -34,9 +34,22 @@ def parse_iso(s: str) -> datetime:
 
 
 def parse(spec: str):
-    sim, _, rest = spec.partition("@")
+    """(simulated start, real unix time, rate) from 'ISO@UNIXxRATE'.
+    Raises ValueError for anything else, or a rate that isn't positive."""
+    sim, at, rest = spec.partition("@")
     real, _, rate = rest.partition("x")
-    return parse_iso(sim), float(real), float(rate or 1.0)
+    try:
+        if not at:
+            raise ValueError("no '@'")
+        t, r = parse_iso(sim), float(rate or 1.0)
+        if not r > 0:
+            raise ValueError(f"rate must be positive, not {rate}")
+        return t, float(real), r
+    except ValueError as e:
+        raise ValueError(
+            f"bad ${ENV} {spec!r} ({e}); expected e.g. "
+            f"2025-07-23T06:00:00+00:00@1764190000.0x20 (scout-sim clock prints one)"
+        ) from None
 
 
 def _current():

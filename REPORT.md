@@ -233,7 +233,7 @@ the fast mode estimate the current once a boat minute, as the service does):
 
 | Scenario | Without | With | Stays the same |
 | --- | --- | --- | --- |
-| Transit, seeds 1/2/3 (all on time) | 1.95 / 2.73 / 1.65 | 1.79 / 2.80 / 1.46 | 5.1 / 3.1 / 3.5 |
+| Transit, seeds 1/2/3 (all on time) | 1.95 / 2.73 / 1.65 | 1.79 / 2.80 / 1.41 | 5.1 / 3.1 / 3.5 |
 | Transit, slow hull (0.3 m/s), bias | −1.63 | −0.60 | 5.3 |
 | Station-keeping, 2 days, bias | +0.57 | +0.36 | 4.3 |
 

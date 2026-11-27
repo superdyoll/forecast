@@ -74,6 +74,7 @@ FLOAT_COLS = [
     "battery_pct",
 ]
 INT_COLS = ["custom_mode", "custom0_arming", "wp_num"]
+REQUIRED_COLS = ["created_at", "communication_mode"] + FLOAT_COLS + INT_COLS
 
 IMT_BACKLOG_GAP_S = 2.0
 MAX_PLAUSIBLE_SPEED_MS = 5.0
@@ -208,9 +209,15 @@ def _mul(a, b):
 
 
 def load(path: str | Path, include_globalstar: bool = True) -> list[dict]:
-    """Return cleaned rows sorted by receipt time."""
+    """Return cleaned rows sorted by receipt time. Raises ValueError if the
+    file lacks any of the expected columns (a renamed export would otherwise
+    load as rows of missing values)."""
     with open(path, newline="") as fh:
-        rows = [_clean(raw) for raw in csv.DictReader(fh)]
+        reader = csv.DictReader(fh)
+        missing = [c for c in REQUIRED_COLS if c not in (reader.fieldnames or [])]
+        if missing:
+            raise ValueError(f"{path}: not a Tether export, missing {missing}")
+        rows = [_clean(raw) for raw in reader]
     rows.sort(key=lambda r: r["time"])
 
     # Flag imt backlog flushes.
@@ -326,6 +333,8 @@ def _fmt(v):
 
 
 def summary(rows: list[dict]) -> str:
+    if not rows:
+        return "rows: 0"
     lines = [
         f"rows: {len(rows)}",
         f"span: {rows[0]['time']:%Y-%m-%d %H:%M} -> "
@@ -384,7 +393,10 @@ def main(argv=None) -> int:
     p.add_argument("--summary", action="store_true", help="print a summary")
     a = p.parse_args(argv)
 
-    rows = load(a.csv, include_globalstar=not a.no_globalstar)
+    try:
+        rows = load(a.csv, include_globalstar=not a.no_globalstar)
+    except ValueError as e:
+        raise SystemExit(str(e))
     if a.summary or not a.out:
         print(summary(rows))
     if a.out:

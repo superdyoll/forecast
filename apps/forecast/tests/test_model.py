@@ -114,6 +114,34 @@ class Loader(unittest.TestCase):
         self.assertIn("autopilot restarts:", s)
 
 
+class BadFiles(unittest.TestCase):
+    def test_empty_export_summarises_without_crashing(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "empty.csv"
+            path.write_text(",".join(T.COLUMNS) + "\n")
+            self.assertEqual(D.summary(D.load(path)), "rows: 0")
+            self.assertIn("rows: 0", quiet(D.main, ["--csv", str(path)])[1])
+            with self.assertRaises(SystemExit):
+                E.build_grid(str(path))  # nothing to model: a clear exit
+
+    def test_renamed_columns_are_refused_not_loaded_as_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "other.csv"
+            path.write_text(
+                "created_at,communication_mode,volts\n2025-07-14 00:00:00+00,imt,24\n"
+            )
+            with self.assertRaises(ValueError) as e:
+                D.load(path)
+            self.assertIn("battery_pct", str(e.exception))
+            for main in (D.main, evaluate.main):
+                with self.assertRaises(SystemExit):
+                    quiet(main, ["--csv", str(path)])
+            with self.assertRaises(SystemExit):
+                quiet(
+                    forecast.main, ["--csv", str(path), "--from", "2025-07-14T01:00Z"]
+                )
+
+
 class Gaps(unittest.TestCase):
     def test_short_gaps_filled_long_gaps_kept(self):
         x = [1.0, None, 3.0, None, None, None, 7.0]

@@ -295,6 +295,38 @@ class Arrival(unittest.TestCase):
         self.assertIn(decide(s, transit(), PARAMS).action, ("hold", "drift"))
 
 
+class PastDeadline(unittest.TestCase):
+    def test_says_the_deadline_passed_and_goes_as_fast_as_is_safe(self):
+        m = transit(arrive_by=T0 - timedelta(hours=1))
+        p = decide(state(60), m, PARAMS)
+        self.assertEqual(p.action, "transit")
+        self.assertIn("the deadline passed 1.0 h ago", " ".join(p.reasons))
+        self.assertNotIn("without going below", " ".join(p.reasons))
+        fastest_safe = decide(state(60), transit(), PARAMS, Config(comfort_pct=0))
+        self.assertGreaterEqual(p.speed_ms, fastest_safe.speed_ms)
+
+
+class Geometry(unittest.TestCase):
+    def test_legs_cross_the_180th_meridian_the_short_way(self):
+        from scout_lowpower.mission import distance_m, legs, unit
+
+        m = Mission(kind="transit", waypoints=[[0.0, -179.99]])
+        ((length, u),) = legs(m, (0.0, 179.99), 0)
+        self.assertAlmostEqual(u[0], 0.0, places=6)
+        self.assertAlmostEqual(u[1], 1.0, places=6)  # east, not round the world west
+        self.assertAlmostEqual(length, distance_m((0.0, 179.99), (0.0, -179.99)))
+        self.assertAlmostEqual(unit((0.0, -179.99), (0.0, 179.99))[0][1], -1.0)
+        self.assertLess(unit((0.0, 179.99), (0.0, -179.99))[1], 2300)  # ~2.2 km
+
+    def test_legs_skip_waypoints_the_boat_is_on(self):
+        from scout_lowpower.mission import legs
+
+        m = Mission(kind="transit", waypoints=[[60.2, 2.2], [60.3, 2.2]])
+        route = legs(m, (60.2, 2.2), 0)
+        self.assertEqual(len(route), 1)
+        self.assertAlmostEqual(route[0][1][0], 1.0)  # due north
+
+
 class StaleIndex(unittest.TestCase):
     def test_stale_loiter_index_far_from_the_end_is_not_arrival(self):
         # Regression: the autopilot's index from the previous mission said

@@ -124,7 +124,10 @@ def main(argv=None) -> int:
 
     L = int(a.lookback_h * E.STEPS_PER_H)
     H = int(a.horizon_h * E.STEPS_PER_H)
-    g = E.build_grid(a.csv)
+    try:
+        g = E.build_grid(a.csv)
+    except ValueError as e:
+        raise SystemExit(str(e))
     origins = E.usable_origins(g, L, H)
     if not origins:
         raise SystemExit("no complete windows: shorten --lookback-h/--horizon-h")

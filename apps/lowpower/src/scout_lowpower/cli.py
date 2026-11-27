@@ -160,7 +160,10 @@ def main(argv=None) -> int:
         else "%(asctime)s %(levelname)s %(message)s"
     )
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format=fmt)
-    st = _settings(a)
+    try:
+        st = _settings(a)
+    except ValueError as e:  # a bad $SCOUT_CLOCK: say so, no traceback
+        raise SystemExit(f"scout-lowpower: {e}")
 
     if a.cmd == "set-mission":
         m = Mission(

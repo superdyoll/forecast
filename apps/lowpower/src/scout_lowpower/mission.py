@@ -125,9 +125,11 @@ def remaining_m(m: Mission, pos, next_wp: int) -> float:
 
 
 def unit(a, b):
-    """(unit north, unit east) from a to b, and the flat-earth length in m."""
+    """(unit north, unit east) from a to b, and the flat-earth length in m.
+    The short way round: across the 180th meridian, not the long way."""
+    dlon = (b[1] - a[1] + 180.0) % 360.0 - 180.0
     n = math.radians(b[0] - a[0]) * EARTH_R
-    e = math.radians(b[1] - a[1]) * EARTH_R * math.cos(math.radians(a[0]))
+    e = math.radians(dlon) * EARTH_R * math.cos(math.radians(a[0]))
     norm = math.hypot(n, e)
     return ((n / norm, e / norm) if norm > 0 else (0.0, 0.0)), norm
 

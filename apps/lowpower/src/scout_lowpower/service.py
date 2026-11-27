@@ -63,6 +63,7 @@ REBOOT_GRACE_S = 60.0  # after a restart, the autopilot's own mode isn't an over
 # After a reconnect, how long to wait for the boot clock (GLOBAL_POSITION_INT)
 # that tells a reboot from a link blip, before trusting the armed state again.
 BOOT_CHECK_S = 10.0
+RESYNC_RETRY_S = 30.0  # after a failed mission upload
 STREAMS_HZ = {
     "GLOBAL_POSITION_INT": 1,
     "SYS_STATUS": 1,
@@ -223,7 +224,7 @@ class Autopilot:
                 M.MAV_TYPE_ONBOARD_CONTROLLER,
             ):
                 return events  # a GCS or companion, not the autopilot
-            gap = now - self.last_hb if self.last_hb else None
+            gap = None if self.last_hb is None else now - self.last_hb
             self.sysid, self.compid = msg["_sysid"], msg["_compid"]
             self.last_hb = now
             self.mode = msg["custom_mode"]
@@ -251,7 +252,11 @@ class Autopilot:
         )
 
     def check_timeout(self, now: float) -> bool:
-        if self.online and self.last_hb and now - self.last_hb > HEARTBEAT_TIMEOUT_S:
+        if (
+            self.online
+            and self.last_hb is not None
+            and now - self.last_hb > HEARTBEAT_TIMEOUT_S
+        ):
             self.online = False
             return True
         return False
@@ -579,8 +584,10 @@ class Service:
                     self.link.send("MISSION_SET_CURRENT", seq=1, **self._target())
                     self.tel.mission_seq = None
                 else:
-                    log.error("mission upload failed; retrying in 30 s")
-                    self.retry_resync_at = now + 30
+                    log.error(
+                        "mission upload failed; retrying in %.0f s", RESYNC_RETRY_S
+                    )
+                    self.retry_resync_at = now + RESYNC_RETRY_S
                     return
             else:
                 self.uploaded = onboard

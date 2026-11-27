@@ -139,6 +139,12 @@ class Command(unittest.TestCase):
         self.assertRegex(distance, r"distance to station: 11\d\d m")
         self.assertFalse((self.state / "decision.json").exists())  # only a what-if
 
+    def test_a_bad_clock_is_a_clear_error_not_a_crash(self):
+        os.environ["SCOUT_CLOCK"] = "2025-07-23T06:00Z@0x0"
+        with self.assertRaises(SystemExit) as e:
+            self.run_cli("status")
+        self.assertIn("bad $SCOUT_CLOCK", str(e.exception))
+
     def test_plan_without_a_mission(self):
         with self.assertRaises(SystemExit) as e:
             self.run_cli("plan", "--lat", "60", "--lon", "2", "--pct", "50")

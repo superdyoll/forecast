@@ -273,9 +273,12 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
             return _plan(best, s, m, line, reasons, prev, cfg)
         if feasible:  # can't make the deadline without breaching the reserve
             best = max(feasible, key=lambda o: o.speed)
+            if deadline_h <= 0:
+                why = f"the deadline passed {-deadline_h:.1f} h ago"
+            else:
+                why = f"deadline can't be met without going below {line:.0f}%"
             reasons.append(
-                f"deadline can't be met without going below {line:.0f}%: "
-                f"fastest safe speed {best.speed:.1f} m/s arrives "
+                f"{why}: fastest safe speed {best.speed:.1f} m/s arrives "
                 f"{best.hours_to_go - deadline_h:.1f} h late"
             )
             _note_min_duty(reasons, duty, cfg)
@@ -313,8 +316,17 @@ def _transit_option(s, m, p, cfg, v, duty, route) -> _Option:
     base = E.base_load_w(p, duty)
     segments, hours = [], 0.0  # (end hour, load W)
     for length, unit in route:
-        cur = _current_at(s, hours + 0.5 * length / max(v, 0.1) / 3600, cfg)
-        sog, stw = C.along_leg(v, unit, cur, stw_max)
+        # The current where the boat is mid-leg. That time depends on the
+        # speed it actually makes, which depends on the current: iterate,
+        # from the speed it makes at the leg's start. (Timing it by the
+        # commanded speed made commands beyond reach look slower.)
+        sog, stw = C.along_leg(v, unit, _current_at(s, hours, cfg), stw_max)
+        for _ in range(20):
+            mid = hours + 0.5 * length / max(sog, cfg.min_progress_ms) / 3600
+            was = sog
+            sog, stw = C.along_leg(v, unit, _current_at(s, mid, cfg), stw_max)
+            if abs(sog - was) < 1e-9:
+                break
         if sog < cfg.min_progress_ms:
             hours = math.inf
             break
