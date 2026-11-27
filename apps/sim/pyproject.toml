@@ -9,7 +9,7 @@ name = "scout-sim"
 dynamic = ["version"]
 description = "Environment (current, wind, cloud) and power simulation around ArduPilot SITL for scout-forecast"
 requires-python = ">=3.9"
-dependencies = ["scout-forecast==0.1.0", "scout-lowpower==0.1.0"]
+dependencies = ["scout-forecast==0.1.1", "scout-lowpower==0.1.1"]
 
 [project.scripts]
 scout-sim = "scout_sim.run:main"
