@@ -61,11 +61,19 @@ systemctl is-enabled -q scout-lowpower scout-web || fail "services not enabled"
 wait_for 20 curl -fsS -o /dev/null http://127.0.0.1:8080/ || fail "web page"
 curl -fsS http://127.0.0.1:8080/api/live | python3 -c 'import json, sys; json.load(sys.stdin)' \
   || fail "/api/live is not JSON"
+unchanged_is_304() { # the data may change between the two requests: retried
+  local tag
+  tag="$(curl -fsS -o /dev/null -D - http://127.0.0.1:8080/api/live | tr -d '\r' | sed -n 's/^ETag: //Ip')"
+  [ -n "$tag" ] && [ "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $tag" \
+    http://127.0.0.1:8080/api/live)" = 304 ]
+}
+wait_for 5 unchanged_is_304 || fail "/api/live doesn't answer 304 when unchanged"
 
 step "the service drives an autopilot (fake rover on tcp:5760)"
 systemd-run --quiet --unit fake-rover python3 /src/apps/lowpower/tests/fake_autopilot.py 5760
 runuser -u scout -- scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --reserve 30 \
-  >/dev/null || fail "set-mission"
+  --arrive-in 48 >/dev/null || fail "set-mission"
+grep -q '"arrive_by": "20' /var/lib/scout-lowpower/mission.json || fail "--arrive-in"
 wait_for 90 journal_has scout-lowpower "mission uploaded" || fail "mission not uploaded"
 wait_for 60 journal_has fake-rover "mode=10 " || fail "autopilot not put in AUTO"
 wait_for 30 sh -c 'scout-lowpower status | grep -q "\"mode\": \"AUTO\""' \
@@ -78,7 +86,19 @@ wait_for 30 sh -c "[ \"\$(systemctl show -p MainPID --value scout-lowpower)\" !=
   && [ \"\$(systemctl show -p MainPID --value scout-lowpower)\" != $pid ] \
   && systemctl is-active -q scout-lowpower" || fail "not restarted"
 
-step "scout-sim installs next to it (no docker here: enabled, not started)"
+step "scout-sim needs docker; its SITL script says so when it's missing"
+apt-get install -s scout-sim | grep -q '^Inst docker.io' || fail "scout-sim doesn't pull in docker"
+out="$(cd /tmp && apt-get download -qq scout-sim >/dev/null && dpkg-deb -x scout-sim_*.deb /tmp/sim \
+  && bash /tmp/sim/usr/share/scout-sim/sitl-container.sh 2>&1 || true)"
+echo "$out" | grep -q "docker is not installed" || fail "sitl-container.sh: no clear docker error: $out"
+rm -rf /tmp/sim /tmp/scout-sim_*.deb
+
+step "scout-sim installs next to it (stand-in docker.io: enabled, not started)"
+# Real docker can't run in this container; a stand-in satisfies the dependency.
+mkdir -p /tmp/fake-docker/DEBIAN
+printf 'Package: docker.io\nVersion: 0~smoke\nArchitecture: all\nMaintainer: smoke <smoke@invalid>\nDescription: stand-in for the smoke test\n' \
+  > /tmp/fake-docker/DEBIAN/control
+dpkg-deb -b /tmp/fake-docker /tmp/fake-docker.deb >/dev/null && dpkg -i /tmp/fake-docker.deb >/dev/null
 apt_quiet install --no-install-recommends scout-sim
 [ -f /etc/scout/sim.env ] || fail "no /etc/scout/sim.env"
 systemctl show -p DropInPaths scout-lowpower | grep -q scout-sim.conf || fail "no drop-in"

@@ -300,16 +300,27 @@ def main(argv=None) -> int:
     if a.cmd == "clock":
         print(clock.make(parse_time(a.start), a.rate))
         return 0
-    model = (
-        E.Params.from_dict(json.loads(Path(a.params).read_text()))
-        if a.params
-        else E.Params()
-    )
+    model = load_params(a.params)
     try:
         Sim(a, model).run()
     except KeyboardInterrupt:
         pass
     return 0
+
+
+def load_params(path: str | None) -> E.Params:
+    """The fitted energy model, or the built-in defaults. A missing or bad file
+    (e.g. no /etc/scout/params.json yet) falls back instead of crash-looping,
+    as the service does."""
+    if not path:
+        return E.Params()
+    try:
+        return E.Params.from_dict(json.loads(Path(path).read_text()))
+    except (OSError, ValueError, TypeError) as e:
+        log.warning(
+            "can't read energy params %s (%s); using built-in defaults", path, e
+        )
+        return E.Params()
 
 
 if __name__ == "__main__":

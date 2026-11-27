@@ -26,7 +26,7 @@ fi
 "$DOCKER" rm -f "$name" >/dev/null 2>&1 || true
 "$DOCKER" run -d --name "$name" --privileged --cgroupns=host \
   -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
-  -v "$repo:/src:ro" -v "$debs:/repo:ro" "${previous[@]}" --add-host host.docker.internal:host-gateway \
+  -v "$repo:/src:ro" -v "$debs:/repo:ro" ${previous[@]+"${previous[@]}"} --add-host host.docker.internal:host-gateway \
   scout-systemd-test >/dev/null
 [ "${KEEP:-0}" = 1 ] || trap '"$DOCKER" rm -f "$name" >/dev/null' EXIT
 

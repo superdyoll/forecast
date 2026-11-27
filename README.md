@@ -138,12 +138,57 @@ PREVIOUS=old/debs packaging/test/smoke.sh         # also test the upgrade from o
 
 ## Simulation (ArduPilot SITL) and web page
 
+### From the debs (Linux, never on the boat)
+
+The simulator is the boat install plus one package, `scout-sim`. It needs
+docker (apt installs `docker.io` if no docker is present) and runs ArduPilot
+Rover SITL in a container, which it pulls on first run. Use an x86-64 machine;
+on arm64 also `apt install qemu-user-static binfmt-support` (the SITL image is
+x86-64 only).
+
+```sh
+# with $repo, $tag and $version set as in "Install on the boat":
+curl -fsSLO "$repo/releases/download/$tag/scout-sim_${version}_all.deb"
+sudo apt install ./scout*_"$version"_all.deb  # boat packages + scout-sim (+ docker.io)
+journalctl -u scout-sitl -f                   # first run: pulls the SITL image (several GB
+                                              # unpacked), then "starting SITL x1"; Ctrl-C
+sudo -u scout scout-lowpower set-mission \
+  --transit 60.215,2.210 60.230,2.240 60.240,2.200 --arrive-in 4 --reserve 30
+xdg-open http://127.0.0.1:8080                # updates itself every few seconds
+```
+
+Installing `scout-sim` puts the boat services on a simulated clock (July sun
+at 60 N, starting 06:00Z) from `/etc/scout/sim.env`, and starts `scout-sitl`
+(SITL in docker) and `scout-sim` (sea, sky and power). `--arrive-in` is on that
+clock. To run 20x faster (about 4 simulated hours in 12 minutes), start the
+clock again at the new rate; SITL is recreated to match, and the service then
+decides every 15 s instead of every 5 min:
+
+```sh
+sudo sed -i "s|^SCOUT_CLOCK=.*|SCOUT_CLOCK=$(scout-sim clock --start 2025-07-23T06:00Z --rate 20)|" /etc/scout/sim.env
+sudo rm -f /var/lib/scout-lowpower/history.jsonl  # history from the old clock
+sudo systemctl restart scout-sitl scout-sim scout-lowpower scout-web
+sudo -u scout scout-lowpower set-mission \
+  --transit 60.215,2.210 60.230,2.240 60.240,2.200 --arrive-in 4 --reserve 30
+```
+
+`sudo apt purge scout-sim` puts the services back on the real clock and
+removes the SITL container (`docker image rm radarku/ardupilot-sitl` frees the
+image too).
+
+### From a checkout (development, any OS with docker)
+
 ```sh
 pip install -r requirements-dev.txt     # includes apps/sim, which never goes on the boat
 apps/sim/run_sitl.sh                    # SITL in docker + scout-sim + scout-lowpower + scout-web
 SIM_RATE=20 apps/sim/run_sitl.sh        # 20x clock: ~4 simulated hours in 12 minutes
 open http://127.0.0.1:8080
 ```
+
+The SITL container keeps the rate it was created with: after changing
+`SIM_RATE`, `docker rm -f scout-sitl` first.
+
+### What runs
 
 * **SITL**: the `radarku/ardupilot-sitl` image (ArduPilot 4.0, Rover,
   `sailboat-motor` boat model), started with `apps/sim/sitl/scout.parm`.
@@ -160,6 +205,11 @@ open http://127.0.0.1:8080
   boat). Shows the current decision and why, battery readings against any
   earlier forecast, forecast error by lead time against "stays the same",
   load and solar, and forecasts of historical periods from the telemetry CSV.
+  The page checks for new data every 5 s and redraws only when it changed
+  (the server answers 304 otherwise, cheap over a satellite link). It keeps
+  your choices, waits while you hover a chart, pauses in a background tab, and
+  says when the server can't be reached. The compared forecast defaults to
+  "auto" (made ~3 h before the latest), which moves forward by itself.
 
 ## Tests
 

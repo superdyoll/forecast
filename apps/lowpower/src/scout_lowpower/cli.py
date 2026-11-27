@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from scout_forecast import clock
@@ -30,6 +31,7 @@ from .mission import save as save_mission
 from .service import Service, Settings
 
 log = logging.getLogger("scout_lowpower")
+DECIDE_EVERY_S = 300.0
 
 
 def _settings(a) -> Settings:
@@ -53,6 +55,10 @@ def _settings(a) -> Settings:
     for k in ("interval_s", "dry_run", "starlink_relay"):
         if getattr(a, k, None) is not None:
             setattr(st, k, getattr(a, k))
+    if getattr(a, "interval_s", None) is None:
+        # 5 min of boat time between decisions; on a fast simulated clock that
+        # is fewer real seconds (but not under 15 s).
+        st.interval_s = max(15.0, DECIDE_EVERY_S / clock.rate())
     if getattr(a, "no_rearm", False):
         st.rearm = False
     return st
@@ -106,7 +112,10 @@ def main(argv=None) -> int:
         "--params", help="params.json from scout-evaluate (default $SCOUT_PARAMS)"
     )
     r.add_argument(
-        "--interval-s", type=float, help="seconds between decisions (default 300)"
+        "--interval-s",
+        type=float,
+        help="real seconds between decisions (default 300, divided by the "
+        "simulated clock's rate, at least 15)",
     )
     r.add_argument(
         "--dry-run",
@@ -127,7 +136,14 @@ def main(argv=None) -> int:
     g = sm.add_mutually_exclusive_group(required=True)
     g.add_argument("--transit", nargs="+", metavar="LAT,LON")
     g.add_argument("--station", metavar="LAT,LON")
-    sm.add_argument("--arrive-by")
+    when = sm.add_mutually_exclusive_group()
+    when.add_argument("--arrive-by", help="ISO time, e.g. 2025-07-25T12:00Z")
+    when.add_argument(
+        "--arrive-in",
+        type=float,
+        metavar="HOURS",
+        help="deadline this many hours from now (on the simulated clock if set)",
+    )
     sm.add_argument("--hold-until")
     sm.add_argument(
         "--reserve", type=float, default=30.0, help="minimum battery_pct (default 30)"
@@ -161,7 +177,11 @@ def main(argv=None) -> int:
             station=_pos(a.station) if a.station else None,
             radius_m=a.radius,
             drift_radius_m=a.drift_radius,
-            arrive_by=parse_time(a.arrive_by) if a.arrive_by else None,
+            arrive_by=(
+                parse_time(a.arrive_by)
+                if a.arrive_by
+                else clock.now() + timedelta(hours=a.arrive_in) if a.arrive_in else None
+            ),
             hold_until=parse_time(a.hold_until) if a.hold_until else None,
             min_reserve_pct=a.reserve,
         )

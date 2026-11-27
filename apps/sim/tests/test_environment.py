@@ -59,5 +59,13 @@ class PowerTests(unittest.TestCase):
         self.assertTrue(math.isfinite(moving.volt))
 
 
+class Params(unittest.TestCase):
+    def test_missing_params_file_falls_back_to_defaults(self):
+        from scout_sim.run import load_params
+
+        self.assertEqual(load_params("/nonexistent/params.json"), E.Params())
+        self.assertEqual(load_params(None), E.Params())
+
+
 if __name__ == "__main__":
     unittest.main()

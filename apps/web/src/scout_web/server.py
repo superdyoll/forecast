@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import hashlib
 import json
 import logging
 import os
@@ -175,11 +176,13 @@ def make_handler(app: App):
         def log_message(self, fmt, *args):
             log.info("%s %s", self.address_string(), fmt % args)
 
-        def _send(self, code, body: bytes, ctype: str):
+        def _send(self, code, body: bytes, ctype: str, etag: str | None = None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            if etag:
+                self.send_header("ETag", etag)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(body)
@@ -203,8 +206,17 @@ def make_handler(app: App):
                         }
                     )
                 elif u.path == "/api/live":
+                    # The page polls this every few seconds. Unchanged data
+                    # answers 304 with no body: cheap over a satellite link.
                     hours = min(max(float(q.get("hours", 48)), 1), 24 * 14)
-                    self._json(live(app.state_dir, hours))
+                    body = json.dumps(live(app.state_dir, hours), default=str).encode()
+                    tag = '"%s"' % hashlib.blake2b(body, digest_size=8).hexdigest()
+                    if self.headers.get("If-None-Match") == tag:
+                        self._send(
+                            HTTPStatus.NOT_MODIFIED, b"", "application/json", tag
+                        )
+                    else:
+                        self._send(HTTPStatus.OK, body, "application/json", tag)
                 elif u.path == "/api/hindcast":
                     if not app.csv:
                         return self._json(
