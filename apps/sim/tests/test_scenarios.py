@@ -43,7 +43,7 @@ class Scenarios(unittest.TestCase):
         cls.results = {name: run(*argv) for name, argv in SCENARIOS.items()}
 
     def test_a_three_day_storm_from_70_percent_never_breaches_the_reserve(self):
-        # REPORT.md "Storms": 30.5 % low, 0 h below the 30 % reserve. Before
+        # REPORT.md "Storms": 30.7 % low, 0 h below the 30 % reserve. Before
         # the storm fixes this ran flat: 0 % and 74 h below.
         s = self.results["storm"]
         self.assertEqual(s["hours_below_reserve"], 0)
@@ -64,10 +64,10 @@ class Scenarios(unittest.TestCase):
                 self.assertEqual(s["hours_below_reserve"], 0)
 
     def test_forecast_error(self):
-        # At 3 h the forecast beats "stays the same" everywhere. Not always at
-        # 1 h (storm 1.14 vs 1.07, seed 2 1.43 vs 1.03: the battery barely
-        # moves in an hour) or at 6 h on seed 2 (5.8 vs 5.1). Hold those
-        # errors where they are.
+        # At 3 h the forecast beats "stays the same" everywhere (seed 2
+        # narrowly: 3.00 vs 3.15). Not always at 1 h (seed 2: 1.38 vs 1.06;
+        # the battery barely moves in an hour). Hold those errors where they
+        # are.
         for name, s in self.results.items():
             e = s["forecast_error"]
             with self.subTest(name):

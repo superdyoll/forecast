@@ -227,7 +227,9 @@ class Model(unittest.TestCase):
 
 # Saved decisions: (description, BoatState kwargs, mission, expected).
 # min_pct is checked to within half a point; update deliberately, with the
-# reason in the commit, when the planner is meant to change.
+# reason in the commit, when the planner or the shipped fit is meant to change.
+# (Last: the refit of run 20261127T233027Z moved the lows by 0.3-1.8 points;
+# every action and speed stayed.)
 T0 = datetime(2025, 7, 23, 6, tzinfo=timezone.utc)
 ROUTE = [[60.30, 2.20], [60.50, 2.20]]
 SAVED = [
@@ -235,37 +237,37 @@ SAVED = [
         "calm transit, no deadline",
         dict(battery_pct=80),
         dict(kind="transit", waypoints=ROUTE),
-        ("transit", 0.9, 0.25, 64.9),
+        ("transit", 0.9, 0.25, 63.1),
     ),
     (
         "transit with a 30 h deadline",
         dict(battery_pct=60),
         dict(kind="transit", waypoints=ROUTE, arrive_by=T0 + timedelta(hours=30)),
-        ("transit", 0.4, 0.25, 60.0),
+        ("transit", 0.4, 0.25, 59.6),
     ),
     (
         "33 km into a 0.5 m/s current: unaffordable",
         dict(battery_pct=60, current_ms=(-0.5, 0.0), current_mean_ms=(-0.5, 0.0)),
         dict(kind="transit", waypoints=ROUTE),
-        ("pause", None, 0.05, 60.1),
+        ("pause", None, 0.05, 60.0),
     ),
     (
         "low battery at night",
         dict(battery_pct=38, time=T0.replace(hour=21), cloud=0.2),
         dict(kind="transit", waypoints=ROUTE),
-        ("pause", None, 0.05, 33.1),
+        ("pause", None, 0.05, 32.7),
     ),
     (
         "below the floor",
         dict(battery_pct=25),
         dict(kind="transit", waypoints=ROUTE),
-        ("pause", None, 0.05, 25.2),
+        ("pause", None, 0.05, 24.9),
     ),
     (
         "station, calm",
         dict(battery_pct=60),
         dict(kind="station", station=[60.2, 2.2]),
-        ("hold", None, 0.25, 60.0),
+        ("hold", None, 0.25, 59.7),
     ),
     (
         "station in a gale at night",
@@ -273,7 +275,7 @@ SAVED = [
             battery_pct=40, time=T0.replace(hour=21), cloud=0.1, current_ms=(0.0, 0.9)
         ),
         dict(kind="station", station=[60.2, 2.2]),
-        ("drift", None, 0.05, 32.3),
+        ("drift", None, 0.05, 31.4),
     ),
 ]
 

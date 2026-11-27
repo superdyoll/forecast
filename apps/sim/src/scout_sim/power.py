@@ -22,11 +22,13 @@ from scout_forecast import energy as E
 
 @dataclass
 class PowerTruth:
-    capacity_wh: float = 2400.0  # fitted: 2,200
-    sag_pct_per_a: float = 0.9
-    solar_k: float = 250.0  # fitted: ~236
-    solar_gamma: float = 1.5
-    solar_offset_h: float = 0.0
+    # Against the shipped fit (fitted_params.json, run 20261127T233027Z); keep
+    # these offsets if it is refitted.
+    capacity_wh: float = 2500.0  # fitted: 2,300 (+9 %)
+    sag_pct_per_a: float = 0.8  # fitted: 0.8
+    solar_k: float = 380.0  # fitted: ~361 (+5 %)
+    solar_gamma: float = 2.5  # fitted: 2.5
+    solar_offset_h: float = -0.25  # fitted: -0.75 (sun half an hour off)
     hotel_w: float = 11.0  # fitted: 9.9
     starlink_w: float = 22.0
     propulsion_scale: float = 1.1  # x the fitted cubic

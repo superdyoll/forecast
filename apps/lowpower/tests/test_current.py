@@ -66,7 +66,7 @@ class TopSpeed(unittest.TestCase):
 
 class Model(unittest.TestCase):
     def test_fitted_params_ship_with_the_package(self):
-        self.assertEqual(P.capacity_wh, 2200)
+        self.assertEqual(P.capacity_wh, 2300)  # run 20261127T233027Z
         self.assertAlmostEqual(E.max_stw_ms(P), 0.85, delta=0.02)
         for v in (0.2, 0.5, 0.8):
             self.assertAlmostEqual(E.stw_for_power(P, E.propulsion_w(P, v)), v)

@@ -19,7 +19,7 @@ environment, power truth and planner without SITL.
 - **Starlink costs about 22 W,** twice the rest of the idle boat (about 10 W).
   Propulsion is the only bigger load.
 - **A physical energy-balance model forecasts well when the plan is known:**
-  3.11 points of error over 12 hours, against 7.69 for "stays the same". A Keras
+  3.23 points of error over 12 hours, against 7.69 for "stays the same". A Keras
   LSTM did worse than that baseline (7.99) and isn't used.
 - **The low-power mode works end to end in SITL:** it uploads the mission, holds
   speed, keeps the reserve, and survives autopilot restarts, link loss, its own
@@ -72,19 +72,23 @@ simulates the battery on a 15-minute grid:
   to current.
 
 The physical model and the LSTM were checked on the same 5 blocked, purged time
-folds (1,458 windows; `scout-evaluate` run `20261126T194630Z`). Every parameter
-was refitted per fold. Error is in battery-% points; lower is better.
+folds (1,458 windows; physical model: `scout-evaluate` run `20261127T233027Z`;
+LSTM: run `20261126T192216Z`). Every parameter was refitted per fold. Error is in
+battery-% points; lower is better.
 
 | Method | 1 h | 3 h | 6 h | 12 h | All |
 | --- | --- | --- | --- | --- | --- |
-| **Physical, known plan** | **0.96** | **2.07** | **3.30** | **4.87** | **3.11** |
-| Physical, blind | 1.65 | 3.45 | 6.25 | 11.84 | 6.44 |
+| **Physical, known plan** | **0.98** | **2.17** | **3.46** | **5.01** | **3.23** |
+| Physical, blind | 1.64 | 3.53 | 6.42 | 11.99 | 6.56 |
 | Stays the same | 1.84 | 4.66 | 8.18 | 12.40 | 7.69 |
 | Same as yesterday | 2.09 | 4.76 | 8.34 | 14.19 | 8.18 |
 | LSTM | 2.08 | 4.99 | 7.85 | 12.88 | 7.99 |
 
-- **The known-plan model wins in every fold and at every lead time.** At 1 hour it
-  is near the noise floor of a voltage reading (0.2-point steps plus sag).
+- **The known-plan model wins overall, and in every fold from 6 hours on.** In
+  the last fold (07-27 to 07-30, mostly after Starlink stopped) the blind model
+  is slightly better at 1 and 3 hours (0.69 against 0.71, 1.59 against 1.64). At
+  1 hour it is near the noise floor of a voltage reading (0.2-point steps plus
+  sag).
 - **Almost all the skill comes from knowing the load.** So the low-power mode
   forecasts from its own plan.
 - **The LSTM barely trained.** Early stopping chose epoch 1–2 in four folds, so it
@@ -95,17 +99,26 @@ was refitted per fold. Error is in battery-% points; lower is better.
 
 | Parameter | Folds | All data |
 | --- | --- | --- |
-| Capacity (Wh per 100 points) | 2,100–2,400 | 2,200 |
-| Sag (points per A) | 0.6–0.9 | 0.9 |
-| Clear-sky solar `k` (W) | 195–240 | 236 |
-| Average cloud factor | 0.60–0.69 | 0.63 |
+| Capacity (Wh per 100 points) | 2,100–2,400 | 2,300 |
+| Sag (points per A) | 0.7–0.9 | 0.8 |
+| Clear-sky solar `k` (W) | 241–365 | 361 |
+| Solar exponent `γ` | 1.75–2.5 | 2.5 |
+| Clock offset (h) | −0.75–0 | −0.75 |
+| Average cloud factor | 0.55–0.68 | 0.62 |
 
-**Not yet measured:**
-- **Bias direction.** Error grows about 0.35 points per hour, which suggests a
-  steady capacity or solar bias. Signed bias was added to `scout-evaluate` after
-  this run, so a fresh run will show the direction.
-- **Solar exponent.** `γ` came out at 1.5, the top of the old search grid; the grid
-  now goes to 2.5.
+**What the rerun changed.** The earlier run (`20261126T194630Z`: 3.11 overall,
+`γ` 1.5, `k` 236) had `γ` at the top of the old search grid. With the grid
+reaching 2.5 the fit chooses a sharper solar curve (`γ` 2.5, `k` 361): clear-sky
+output at the July noon sun at 60 N (about 50° up) rises from 158 to 185 W, and at
+20° falls from 47 to 25 W. It scores 0.02–0.16 points worse per lead time, within
+the spread between folds. `γ`
+again sits at the top of the grid, and it is chosen by how well it correlates
+with measured solar, not by forecast error: worth testing a wider grid, or
+choosing `γ` by forecast error. The shipped `fitted_params.json` is this run's
+all-data fit.
+
+**Bias.** The known-plan forecast is pessimistic by 1.2 points on average over
+all lead times (blind: 1.7): the boat did a little better than forecast.
 
 **Trust it for:** 6–12 hour forecasts under a given plan (about ±3–5 points), and
 comparing plans. It has only been checked between about 28 % and 100 %, so keep a
@@ -207,7 +220,8 @@ where AUTO power stops rising (about 73 W). It now ships with the package
 (`fitted_params.json`) and as `/etc/scout/params.json` in the deb, so a clone or
 an install without the private data uses the fit, not generic defaults.
 
-**SITL, 20 ×, demo transit (6.7 km, 4 h deadline), 1-hour forecast error:**
+**SITL, 20 ×, demo transit (6.7 km, 4 h deadline), 1-hour forecast error** (these
+runs used the earlier fit, `20261126T194630Z`):
 
 | Run | Current estimate error | 1 h error / bias | Stays the same |
 | --- | --- | --- | --- |
@@ -228,32 +242,34 @@ current, ArduPilot made 0.7–0.8 m/s over ground for a 0.3–0.4 m/s command, a
 at a few watts. See [Open issues](#open-issues).
 
 **Fast simulation, the same planner with and without the current estimate**
-(`scout-sim fast`, 0.75–2 days; error at 3 hours; rerun after the code review, which made
-the fast mode estimate the current once a boat minute, as the service does):
+(`scout-sim fast`, 0.75–2 days; error at 3 hours; rerun with the refitted model,
+the simulator's truth kept ~5–10 % off it as before):
 
 | Scenario | Without | With | Stays the same |
 | --- | --- | --- | --- |
-| Transit, seeds 1/2/3 (all on time) | 1.95 / 2.73 / 1.65 | 1.79 / 2.80 / 1.41 | 5.1 / 3.1 / 3.5 |
-| Transit, slow hull (0.3 m/s), bias | −1.63 | −0.60 | 5.3 |
-| Station-keeping, 2 days, bias | +0.57 | +0.36 | 4.3 |
+| Transit, seeds 1/2/3 (all on time) | 1.33 / 2.87 / 1.19 | 1.42 / 3.00 / 1.08 | 5.03 / 3.15 / 3.66 |
+| Transit, slow hull (0.3 m/s), error / bias | 2.02 / −1.87 | 1.71 / −0.89 | 5.2 |
+| Station-keeping, 2 days, error / bias | 1.19 / +0.43 | 1.16 / +0.23 | 4.4 |
 
-Over a few hours the gain is modest. The large gains in SITL come from
-what the fast mode's simple boat doesn't have: a hull far slower than the model
-believed.
+On a hull as fast as the model believes, the estimate makes little difference
+over a few hours (slightly worse on seeds 1 and 2, better on seed 3). It pays
+where the hull is slower than the model: there it halves the bias, as in SITL,
+where the large gains come from exactly that.
 
 ## Storms
 
 `scout-sim fast --mission station --storm 24:72`: five days on station with an
 Atlantic low from day 2 to day 4. Solar falls to 8 % of clear sky. Wind rises to
 20 m/s, which adds about 0.6 m/s of leeway drift on top of the current. A calm
-five days from 70 % never goes below 68.7 % (68.65 % on the rerun after the code review).
+five days from 70 % never goes below 67.3 %.
 
 | Planner | Start 70 %: low / hours below reserve | Start 55 % | Start 40 % | 12 h bias |
 | --- | --- | --- | --- | --- |
 | Before | 0 % / 74 h | 0 % / 81 h | – | +10.6 |
 | Floor bug, drift and Starlink fixed | 27.8 % / 4.5 h | 21.0 % / 27 h | 16.8 % / 36 h | +3.0 |
 | + 48 h look-ahead, bad weather persists 96 h, current relaxes | 31.2 % / 0 h | 23.4 % / 14 h | 13.9 % / 42 h | +4.1 |
-| + code review (current estimated every boat minute, as on the boat; station priced at the learnt top speed) | **30.5 % / 0 h** | 23.3 % / 14 h | 14.0 % / 41 h | +4.1 |
+| + code review (current estimated every boat minute, as on the boat; station priced at the learnt top speed) | 30.5 % / 0 h | 23.3 % / 14 h | 14.0 % / 41 h | +4.1 |
+| + refitted model (`20261127T233027Z`) | **30.7 % / 0 h** | 23.8 % / 14 h | 12.4 % / 47 h | +3.5 |
 
 The reserve is 30 %. What went wrong first:
 1. **The battery floor didn't stop the motors.** This was the safety bug above.
