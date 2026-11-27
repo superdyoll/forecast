@@ -9,6 +9,8 @@ StartLimitIntervalSec=0
 Type=simple
 EnvironmentFile=-@ETC@/scout.env
 # Reads what scout-lowpower writes; never writes there.
+# A path, not a secret (detect-secrets flags it as Base64-like):
+# pragma: allowlist nextline secret
 Environment=SCOUT_STATE_DIR=/var/lib/scout-lowpower
 ExecStart=@PREFIX@/current/bin/scout-web
 User=scout

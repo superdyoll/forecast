@@ -248,6 +248,7 @@ class Service:
         self.mode_cmd_want = None  # that mode, until a heartbeat confirms it
         self.link_opens = 0
         self.retry_resync_at = 0.0
+        self.last_state: P.BoatState | None = None
         self.last = {}  # rate limiting: name -> monotonic time
         self.stop = False
         self.state_path = st.state_dir / "state.json"
@@ -288,8 +289,15 @@ class Service:
         }
         write_atomic(self.state_path, json.dumps(d, indent=1))
 
-    def _publish(self, s: P.BoatState | None):
-        """decision.json for operators and the web page; history for hindcasts."""
+    def _publish(self, s: P.BoatState | None, history: bool = True):
+        """decision.json for operators and the web page; history for hindcasts.
+
+        Called at each decision (with history) and every 15 s for status
+        (autopilot online/mode/armed, override), so the page isn't up to a
+        decision interval stale.
+        """
+        self.last_state = s or self.last_state
+        s = self.last_state
         d = {
             "updated": _now().isoformat(),
             "mission": self.mission.to_dict() if self.mission else None,
@@ -314,7 +322,7 @@ class Service:
             },
         }
         write_atomic(self.st.state_dir / "decision.json", json.dumps(d, indent=1))
-        if s and self.plan:
+        if history and s and self.plan:
             hist = self.st.state_dir / "history.jsonl"
             if hist.exists() and hist.stat().st_size > 5_000_000:
                 os.replace(hist, hist.with_suffix(".jsonl.1"))
@@ -438,6 +446,8 @@ class Service:
             and now >= self.retry_resync_at
         ):
             self._resync(now)
+        if self.mission and self._every("status", 15.0, now):
+            self._publish(None, history=False)
         if self._every("observe", 60.0, now):
             self._observe(now)
         if (self.need_decide or now >= self.next_decide) and self.mission:

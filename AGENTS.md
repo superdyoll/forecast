@@ -27,6 +27,12 @@ inputs and may not exist in a fresh clone.
 - Do not copy large parts of `BRIEF.md` into tracked files. Summarise it instead.
 - Generated data goes in `data/`. It is `.csv`, so it is ignored too.
 - Code must not assume the raw CSV is present. Take its path as an argument.
+- Pre-commit runs **detect-secrets** (`.secrets.baseline`). If it flags a false
+  positive, add `pragma: allowlist secret` on that line (or `pragma: allowlist
+  nextline secret` on the line above, for formats without trailing comments
+  such as systemd units), or refresh and audit the baseline:
+  `detect-secrets scan --baseline .secrets.baseline && detect-secrets audit .secrets.baseline`.
+  Never "fix" a real finding by adding it to the baseline.
 
 ## Current state
 
@@ -160,6 +166,11 @@ work around them a second time downstream.
   enforces this.
 - Stock Rover mode 17 is only `ROVER_MODE_ENUM_END`, so Scout's MODE_17 is a
   SentryOS mode. The service only commands AUTO, HOLD and LOITER.
+- **Never boot systemd in a privileged container without masking
+  `systemd-binfmt`**: it clears the shared Docker VM's binfmt handlers and kills
+  x86-64 emulation for every container (SITL then fails with "exec format
+  error"; restarting Docker Desktop restores it). `packaging/test/Dockerfile.systemd`
+  masks it.
 - Right after arming, SITL briefly reports "EKF variance / EKF failsafe" and may
   reject one mode change; it clears within seconds and the service retries.
 - Message intervals are per MAVLink link: each client requests its own streams.

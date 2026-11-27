@@ -41,6 +41,16 @@ repos:
         entry: "Private inputs must not be committed (see AGENTS.md):"
         files: '(\.csv$|(^|/)BRIEF\.md$|(^|/)DATA\.md$|(^|/)\.env$)'
 
+  # Block keys, tokens and passwords. Reviewed false positives are recorded in
+  # .secrets.baseline; refresh it with:
+  #   detect-secrets scan --baseline .secrets.baseline
+  # and review new entries with: detect-secrets audit .secrets.baseline
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+
   - repo: https://github.com/asottile/pyupgrade
     rev: v3.21.0
     hooks:
