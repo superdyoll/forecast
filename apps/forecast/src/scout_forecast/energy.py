@@ -323,10 +323,13 @@ def _fit_battery(g, origins, horizon, sinel, p: Params) -> None:
         for s in (0, 0.6, 1.2, 1.8, 2.4)
     )
     _, c0, s0 = best
+    # Refine: capacity to 100 Wh, sag to 0.1 point/A (0.3 steps missed the
+    # optimum between them on test data with a known answer).
+    sags = sorted({round(max(0.0, s0 + d / 10), 2) for d in range(-3, 4)})
     best = min(
         (score(c, s), c, s)
         for c in range(max(300, c0 - 200), c0 + 201, 100)
-        for s in (max(0.0, s0 - 0.3), s0, s0 + 0.3)
+        for s in sags
     )
     _, p.capacity_wh, p.sag_pct_per_a = best
 

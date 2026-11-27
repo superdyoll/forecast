@@ -174,6 +174,19 @@ class Fit(unittest.TestCase):
     def test_battery_capacity(self):
         self.assertAlmostEqual(self.p.capacity_wh, T.TRUTH.capacity_wh, delta=200)
 
+    def test_sag_absorbs_the_half_step_timing(self):
+        # The model gives battery_pct at the end of each 15-min step; the grid
+        # holds the mean over the step, half a step earlier. In that half step
+        # the rested level moves by net * STEP_H/2 * 100 / capacity, which is
+        # proportional to net power like sag, so the fit takes it as less sag:
+        # truth - STEP_H/2 * 100 * V / capacity (V ~ 24.3 V here: ~0.75).
+        volts = sum(v for v in self.g["volt"] if v) / sum(
+            1 for v in self.g["volt"] if v
+        )
+        shift = E.STEP_H / 2 * 100 * volts / T.TRUTH.capacity_wh
+        effective = T.TRUTH.sag_pct_per_a - shift
+        self.assertAlmostEqual(self.p.sag_pct_per_a, effective, delta=0.1)
+
     def test_solar(self):
         # Clear-sky k and the average cloud factor trade off; their product
         # (what reaches the panels on an average day) is what's identifiable.
