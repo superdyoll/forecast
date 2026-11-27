@@ -1,4 +1,7 @@
 """A fake ArduPilot Rover for testing the low-power service without SITL.
+Test support only (the tests of scout-lowpower and scout-sim, and the deb
+smoke test as `python3 -m scout_lowpower.fake_autopilot`); never used by the
+service itself.
 
 Serves MAVLink on TCP (as SITL does on 5760), streams heartbeat, position
 and battery telemetry, and implements the mission upload/download protocol,
@@ -13,7 +16,7 @@ import socket
 import threading
 import time
 
-from scout_lowpower import mavlink as M
+from . import mavlink as M
 
 
 class FakeRover:
@@ -232,7 +235,7 @@ class FakeRover:
 
 
 if __name__ == "__main__":
-    # Standalone, for the package smoke test: fake_autopilot.py [PORT [VOLTS]]
+    # For the deb smoke test: python3 -m scout_lowpower.fake_autopilot [PORT [VOLTS]]
     import sys
 
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5760

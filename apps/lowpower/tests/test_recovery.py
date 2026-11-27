@@ -8,12 +8,12 @@ import threading
 import unittest
 from pathlib import Path
 
-from fake_autopilot import FakeRover
 from test_service import wait
 
 from scout_forecast import energy as E
 from scout_lowpower import mavlink as M
 from scout_lowpower import service as S
+from scout_lowpower.fake_autopilot import FakeRover
 from scout_lowpower.mission import Mission, save
 
 TRANSIT = Mission(kind="transit", waypoints=[[60.30, 2.20]])

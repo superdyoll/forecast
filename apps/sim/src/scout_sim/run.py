@@ -69,6 +69,7 @@ class Sim:
         self.sim_t = start
         self.opens = 0
         self._pace_ref = None  # (boot ms, monotonic s) for check_pace
+        self.stop = False
 
     def every(self, key, period, now):
         if now - self.last.get(key, -1e9) >= period:
@@ -85,7 +86,7 @@ class Sim:
             clock.rate(),
             self.truth_path,
         )
-        while True:
+        while not self.stop:
             for m in self.sitl.poll(0.2):
                 self.on_message(m)
             now = time.monotonic()
@@ -116,6 +117,8 @@ class Sim:
                 elif self.every("arm", 5.0, now):
                     log.info("arming vehicle (operator action)")
                     self.command(M.MAV_CMD_COMPONENT_ARM_DISARM, 1)
+        self.sitl.close("(scout-sim stopping)")
+        self.out.close("(scout-sim stopping)")
 
     def command(self, cmd, *p):
         self.sitl.command(SITL, cmd, *p)
