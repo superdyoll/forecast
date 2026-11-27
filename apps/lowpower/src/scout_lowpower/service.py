@@ -49,6 +49,9 @@ SERVICE_MODES = (M.MODE_AUTO, M.MODE_HOLD, M.MODE_LOITER)
 HEARTBEAT_TIMEOUT_S = 5.0
 LOAD_FACTOR_MAX = 8.0
 REBOOT_GRACE_S = 60.0  # after a restart, the autopilot's own mode isn't an override
+# After a reconnect, how long to wait for the boot clock (GLOBAL_POSITION_INT)
+# that tells a reboot from a link blip, before trusting the armed state again.
+BOOT_CHECK_S = 10.0
 STREAMS_HZ = {
     "GLOBAL_POSITION_INT": 1,
     "SYS_STATUS": 1,
@@ -160,6 +163,17 @@ class Autopilot:
         self.boot_ms = None
         self.online = False
         self.restarted_at = None
+        # Set on (re)connect until the next boot clock arrives: until then a
+        # quick reboot (shorter than the heartbeat timeout) can't be told apart
+        # from a link blip, so its "disarmed" mustn't be taken as intended.
+        self.boot_unknown_since = None
+
+    def reconnected(self, now: float) -> None:
+        self.boot_unknown_since = now
+
+    def boot_unknown(self, now: float) -> bool:
+        s = self.boot_unknown_since
+        return s is not None and now - s < BOOT_CHECK_S
 
     def update(self, msg: dict, now: float) -> list[str]:
         events = []
@@ -186,6 +200,7 @@ class Autopilot:
             if self.boot_ms is not None and b + 200 < self.boot_ms:
                 events.append("rebooted")
             self.boot_ms = b
+            self.boot_unknown_since = None
         return events
 
     def check_timeout(self, now: float) -> bool:
@@ -407,6 +422,8 @@ class Service:
                 mavlink_version=3,
             )
         if self.link.opens != self.link_opens:
+            if self.link_opens:  # a reconnect, not the first connection
+                self.ap.reconnected(now)
             self.link_opens = self.link.opens
             self.need_resync = True  # any reconnect: re-check mission, mode, speed
         if self.ap.check_timeout(now):
@@ -423,10 +440,10 @@ class Service:
                 self.ap.restarted_at is not None
                 and now - self.ap.restarted_at < REBOOT_GRACE_S
             )
-            if not in_grace:
-                self.was_armed = (
-                    self.ap.armed
-                )  # follows the operator; frozen just after a restart
+            if not in_grace and not self.ap.boot_unknown(now):
+                # Follows the operator; frozen just after a restart, and after
+                # a reconnect until the boot clock says whether it rebooted.
+                self.was_armed = self.ap.armed
         if (
             self.ap.online
             and self.need_resync
@@ -709,7 +726,7 @@ class Service:
         if s is None:
             if self._every("stale_log", 300, now):
                 log.warning("telemetry stale or missing; keeping the current plan")
-            self.next_decide = now + 30
+            self.next_decide = now + 5  # cheap to check; decide as soon as it's back
             return
         new = P.decide(s, self.mission, self.params, self.cfg, prev=self.plan)
         changed = not new.same_control(self.plan)

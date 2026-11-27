@@ -29,10 +29,12 @@ def wait(cond, timeout=20.0):
 
 
 class ServiceRecovers(unittest.TestCase):
+    POSITION_DELAY_S = 0.0
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.state = Path(self.tmp.name)
-        self.rover = FakeRover().start()
+        self.rover = FakeRover(position_delay_s=self.POSITION_DELAY_S).start()
         self.rover.armed = True
         save(
             Mission(kind="transit", waypoints=[[60.30, 2.20], [60.50, 2.20]]),
@@ -62,6 +64,10 @@ class ServiceRecovers(unittest.TestCase):
         self.assertTrue(wait(self.engaged), "mission, AUTO and speed not set")
         self.assertEqual(r.mission[-1][0], M.MAV_CMD_NAV_LOITER_UNLIM)
 
+        # A real autopilot has been up a while before it reboots; give the fake
+        # some uptime so its boot clock visibly goes back (the only sign of a
+        # reboot shorter than the heartbeat timeout).
+        time.sleep(3)
         r.restart(down_s=2)  # reboots disarmed in MANUAL
         self.assertTrue(
             wait(lambda: r.mode == M.MODE_AUTO and r.armed, 30),
@@ -93,6 +99,41 @@ class ServiceRecovers(unittest.TestCase):
         self.assertIsNotNone(again.plan, "plan not restored after service restart")
         self.assertIsNotNone(again.uploaded)
         self.assertTrue((self.state / "decision.json").exists())
+
+
+class QuickRebootSeenBeforeItsBootClock(unittest.TestCase):
+    """A reboot shorter than the heartbeat timeout is only recognised from the
+    boot clock in GLOBAL_POSITION_INT. If heartbeats of the disarmed, rebooted
+    autopilot arrive first, the service must not take "disarmed" as what the
+    operator wanted (it failed this way on a slow CI runner)."""
+
+    def test_rearms_when_position_lags_the_heartbeat(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            rover = FakeRover(position_delay_s=2.0).start()
+            rover.armed = True
+            save(
+                Mission(kind="transit", waypoints=[[60.30, 2.20]]),
+                state / "mission.json",
+            )
+            st = S.Settings(
+                mavlink=f"tcp:127.0.0.1:{rover.port}", state_dir=state, interval_s=3
+            )
+            svc = S.Service(st, E.Params())
+            t = threading.Thread(target=svc.run, daemon=True)
+            t.start()
+            try:
+                self.assertTrue(wait(lambda: rover.mode == M.MODE_AUTO and rover.armed))
+                time.sleep(3)  # uptime, so the boot clock visibly goes back
+                rover.restart(down_s=1)
+                self.assertTrue(
+                    wait(lambda: rover.mode == M.MODE_AUTO and rover.armed, 30),
+                    "did not re-arm after a quick reboot",
+                )
+            finally:
+                svc.stop = True
+                t.join(5)
+                rover.close()
 
 
 if __name__ == "__main__":

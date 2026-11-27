@@ -17,8 +17,14 @@ from scout_lowpower import mavlink as M
 
 
 class FakeRover:
-    def __init__(self, port: int = 0, lat=60.20, lon=2.20, volt=23.0):
+    def __init__(
+        self, port: int = 0, lat=60.20, lon=2.20, volt=23.0, position_delay_s=0.0
+    ):
         self.lat, self.lon, self.volt = lat, lon, volt
+        # Seconds after boot before position (with its boot clock) streams: a
+        # real autopilot's heartbeat and position are separate streams, so the
+        # service can see the heartbeat of a rebooted autopilot first.
+        self.position_delay_s = position_delay_s
         self.mode, self.armed = 0, False
         self.mission = []  # (command, lat, lon, param3)
         self.params = {}
@@ -117,12 +123,13 @@ class FakeRover:
             system_status=4,
             mavlink_version=3,
         )
-        self.send(
-            "GLOBAL_POSITION_INT",
-            time_boot_ms=int((now - self.boot) * 1000),
-            lat=int(self.lat * 1e7),
-            lon=int(self.lon * 1e7),
-        )
+        if now - self.boot >= self.position_delay_s:
+            self.send(
+                "GLOBAL_POSITION_INT",
+                time_boot_ms=int((now - self.boot) * 1000),
+                lat=int(self.lat * 1e7),
+                lon=int(self.lon * 1e7),
+            )
         mv = int(self.volt * 1000)
         self.send(
             "SYS_STATUS", voltage_battery=mv, current_battery=150, battery_remaining=60
