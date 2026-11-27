@@ -50,33 +50,107 @@ class Scoring(unittest.TestCase):
             self.assertEqual(live["history"], [])
 
 
+class Server:
+    """scout-web on a free port, for one test."""
+
+    def __init__(self, state_dir, csv=None):
+        import threading
+        from http.server import ThreadingHTTPServer
+
+        self.srv = ThreadingHTTPServer(
+            ("127.0.0.1", 0), web.make_handler(web.App(state_dir, csv))
+        )
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
+
+    def get(self, path, etag=None):
+        """(status, ETag, body) of GET path; HTTP errors are returned too."""
+        import urllib.error
+        import urllib.request
+
+        req = urllib.request.Request(self.base + path)
+        if etag:
+            req.add_header("If-None-Match", etag)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, r.headers["ETag"], r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers["ETag"], e.read()
+
+    def close(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
+class Hindcast(unittest.TestCase):
+    """/api/config and /api/hindcast, on a synthetic telemetry CSV."""
+
+    @classmethod
+    def setUpClass(cls):
+        from scout_forecast import testdata
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        d = Path(cls.tmp.name)
+        csv = testdata.write(d / "telemetry.csv", days=4)
+        cls.web = Server(d, csv)
+        cls.bare = Server(d)  # no CSV configured
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.web.close()
+        cls.bare.close()
+        cls.tmp.cleanup()
+
+    def json(self, server, path):
+        code, _, body = server.get(path)
+        return code, json.loads(body)
+
+    def test_config_says_what_can_be_hindcast(self):
+        code, c = self.json(self.web, "/api/config")
+        self.assertEqual(code, 200)
+        self.assertTrue(c["hindcast"])
+        self.assertTrue(c["data_from"] < c["data_to"])
+        self.assertFalse(self.json(self.bare, "/api/config")[1]["hindcast"])
+
+    def test_hindcast_scores_a_past_window(self):
+        code, r = self.json(self.web, "/api/hindcast?from=2025-07-16T00:00Z&hours=6")
+        self.assertEqual(code, 200)
+        self.assertEqual(len(r["steps"]), 24)
+        self.assertLess(r["summary"]["mae"], r["summary"]["mae_persistence"])
+
+    def test_bad_requests(self):
+        for path, code in (
+            ("/api/hindcast?from=2025-07-16T00:00Z&plan=guess", 400),
+            ("/api/hindcast?hours=6", 400),  # no start
+            ("/api/hindcast?from=yesterday", 400),
+            ("/api/hindcast?from=2024-01-01T00:00Z", 400),  # outside the data
+            ("/api/live?hours=lots", 400),
+            ("/nothing-here", 404),
+        ):
+            got, body = self.json(self.web, path)
+            self.assertEqual(got, code, path)
+            self.assertIn("error", body)
+        got, body = self.json(self.bare, "/api/hindcast?from=2025-07-16T00:00Z")
+        self.assertEqual(got, 404)
+        self.assertIn("SCOUT_TELEMETRY_CSV", body["error"])
+
+    def test_page_is_served(self):
+        code, _, body = self.web.get("/")
+        self.assertEqual(code, 200)
+        self.assertIn(b"<html", body)
+
+
 class LivePolling(unittest.TestCase):
     """The page polls /api/live every few seconds: unchanged data is a 304."""
 
     def test_etag_answers_304_until_the_data_changes(self):
-        import threading
-        import urllib.error
-        import urllib.request
-        from http.server import ThreadingHTTPServer
-
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
             history(d, [{"time": T0.isoformat(), "battery_pct": 70}])
-            srv = ThreadingHTTPServer(
-                ("127.0.0.1", 0), web.make_handler(web.App(d, None))
-            )
-            threading.Thread(target=srv.serve_forever, daemon=True).start()
-            url = f"http://127.0.0.1:{srv.server_address[1]}/api/live"
+            srv = Server(d)
 
             def get(etag=None):
-                req = urllib.request.Request(url)
-                if etag:
-                    req.add_header("If-None-Match", etag)
-                try:
-                    with urllib.request.urlopen(req, timeout=5) as r:
-                        return r.status, r.headers["ETag"], r.read()
-                except urllib.error.HTTPError as e:
-                    return e.code, e.headers["ETag"], e.read()
+                return srv.get("/api/live", etag)
 
             try:
                 code, tag, body = get()
@@ -89,8 +163,7 @@ class LivePolling(unittest.TestCase):
                 self.assertEqual(code, 200)
                 self.assertNotEqual(new_tag, tag)
             finally:
-                srv.shutdown()
-                srv.server_close()
+                srv.close()
 
 
 if __name__ == "__main__":
