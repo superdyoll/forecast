@@ -41,7 +41,7 @@ inputs and may not exist in a fresh clone.
 | `scripts/quickstart.sh` | **Fresh clone to running simulation**: `.venv` + editable install, docker/port checks, SITL image pull, `apps/sim/run_sitl.sh` at 20x, prints `READY <url>`. `--install-only`, `--test`. Used by the `install-and-run` skill (`.claude/skills/`); `CLAUDE.md` imports this file. |
 | `apps/` | One Python app per folder, each its own wheel with `pyproject.toml`, `src/<package>/` and `tests/`. Dependencies only point down: `forecast` <- `lowpower` <- `sim`, and `forecast` <- `web`. `web` and `lowpower` share only the state files, never imports. |
 | `apps/forecast/` | **`scout-forecast`** (`scout_forecast`, stdlib only, no dependencies): `data.py` (load/clean/resample the Tether CSV), `energy.py` (physical model: grid, fit, simulate, project), `evaluate.py` (blocked, purged k-fold), `forecast.py`. Also what the other apps share: `env.py` (`.env` and `--csv`), `clock.py` (simulated clock, `SCOUT_CLOCK`). Commands: `forecast`, `scout-evaluate`, `scout-data`. Best model so far (3.1 points over 12 h with a known plan). Its tests check it never imports the apps above it. |
-| `apps/lowpower/` | **`scout-lowpower`** (`scout_lowpower`, the boat service, stdlib + scout-forecast): `planner.py` (pure decision logic), `mission.py` (operator mission file), `mavlink.py` (MAVLink v2 codec + self-reconnecting tcp/udp/serial links), `service.py` (the run loop: telemetry, decisions, commands, recovery), `cli.py` (`scout-lowpower run / set-mission / status / plan`). Survives link loss, autopilot restarts (resync, mission check, re-arm), operator overrides and its own restarts. Tests: planner decisions, codec (byte-for-byte vs pymavlink if installed), recovery against `tests/fake_autopilot.py` (~20 s). |
+| `apps/lowpower/` | **`scout-lowpower`** (`scout_lowpower`, the boat service, stdlib + scout-forecast): `planner.py` (pure decision logic), `mission.py` (operator mission file), `mavlink.py` (MAVLink v2 codec + self-reconnecting tcp/udp/serial links), `service.py` (the run loop: telemetry, decisions, commands, recovery), `cli.py` (`scout-lowpower run / set-mission / status / plan`). Survives link loss, autopilot restarts (resync, mission check, re-arm), operator overrides and its own restarts. Tests: planner decisions, codec (byte-for-byte vs pymavlink if installed), recovery against `tests/fake_autopilot.py` (~35 s). |
 | `apps/web/` | **`scout-web`** (`scout_web`, stdlib + scout-forecast): `server.py` + `static/index.html`, forecast vs actual page (no external assets, localhost by default). Reads the service's `decision.json` / `history.jsonl`; `/api/hindcast` forecasts past periods from the CSV. |
 | `apps/sim/` | **`scout-sim`** (never on the boat): environment (current, wind, cloud) pushed into ArduPilot 4.0 SITL as `SIM_TIDE` drift, and a power model publishing `BATTERY_STATUS` to the service's `--power-link`. `apps/sim/run_sitl.sh` runs SITL (docker `radarku/ardupilot-sitl`) + sim + service + web. |
 | `model/lstm/train_lstm.py` | Experiment, not an app. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. No app may import or mention it. Needs scout-forecast plus `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
@@ -75,44 +75,22 @@ Update this table when you add components.
 ## Commands
 
 ```sh
-# Install every app, editable (needs pip >= 21.3; macOS's system pip 21.2
-# builds "UNKNOWN" wheels, so use a venv with a current pip)
-pip install -r requirements-dev.txt
-packaging/build.sh                   # wheels + debs + apt index in ./dist (see README)
-packaging/test/smoke.sh              # install the debs under systemd in docker, ~1 min
+scripts/quickstart.sh                # fresh clone -> .venv -> simulation at 20x, prints READY <url>
+scripts/quickstart.sh --test         # every app's unit tests
+packaging/build.sh                   # wheels + debs + apt index in ./dist
+packaging/test/smoke.sh              # the debs under systemd in docker, ~1 min
 
-# The CSV path is never built in: pass --csv or set SCOUT_TELEMETRY_CSV.
-# Outputs go under ./runs/ (gitignored).
-cp .env.example .env   # then set SCOUT_TELEMETRY_CSV (a shell export overrides it)
+# Need the private CSV (--csv, SCOUT_TELEMETRY_CSV or .env); outputs go under ./runs/
+scout-data --summary                 # links, modes, flags, restarts, value ranges
+forecast --from 2025-07-23T00:00Z --hours 24 [--plan persist]
+scout-evaluate                       # blocked, purged k-fold; writes params.json fitted on all data
 
-# Summary of the raw data: links, modes, flags, restarts, value ranges
-scout-data --summary
-
-# One cleaned row per message / fixed-interval averages (backlog rows excluded)
-scout-data -o data/clean.csv
-scout-data -o data/5min.csv --resample 300
-
-# Battery forecast (physical model). Fitted with the forecast window held out.
-forecast --from 2025-07-23T00:00Z --hours 24 [--plan persist] [--json out.json]
-
-# Cross-validate the physical model; also writes params.json fitted on all data
-scout-evaluate
-
-# Low-power mode: set a mission, run the service against ArduPilot
-scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --arrive-by 2025-07-25T12:00Z --reserve 30
-scout-lowpower run --mavlink tcp:127.0.0.1:5760 --params runs/physical/<ts>/params.json
-scout-lowpower status                       # current decision (decision.json)
 scout-lowpower plan --lat 60.2 --lon 2.2 --pct 55   # what-if, no autopilot
-
-# Simulation: SITL (docker) + scout-sim + service + web on http://127.0.0.1:8080
-SIM_RATE=20 apps/sim/run_sitl.sh
-
-# Tests: each app has its own
-for d in apps/*/tests; do python -m unittest discover -s "$d" || break; done
-
-# LSTM experiment, outside the apps (needs model/lstm/requirements.txt)
-python3 -m model.lstm.train_lstm
+python3 -m model.lstm.train_lstm     # LSTM experiment (model/lstm/requirements.txt)
 ```
+
+macOS's system pip (21.2) can't install these projects; `quickstart.sh` uses a
+venv with a current pip.
 
 As a library:
 
@@ -182,6 +160,13 @@ work around them a second time downstream.
 - Right after arming, SITL briefly reports "EKF variance / EKF failsafe" and may
   reject one mode change; it clears within seconds and the service retries.
 - Message intervals are per MAVLink link: each client requests its own streams.
+- **ArduPilot's speed target is over ground**; the energy model and the planner
+  think in speed through the water. With current the two differ a lot (see
+  REPORT.md, Open issues). The `sailboat-motor` hull tops out near 0.8 m/s
+  through the water.
+- A reboot shorter than the 5 s heartbeat timeout shows only in the boot clock
+  (`time_boot_ms`); keep tests giving the fake autopilot a few seconds of uptime
+  before rebooting it.
 
 ## Working conventions
 

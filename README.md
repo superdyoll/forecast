@@ -29,48 +29,11 @@ Each app in `apps/` is its own wheel. Dependencies only point down the table.
 
 `model/lstm/` is a training experiment, not an app.
 
-## Install
-
-```sh
-pip install -r requirements-dev.txt     # development: all apps, editable (pip >= 21.3)
-packaging/build.sh                      # dist/wheels/*.whl, dist/debs/*.deb + apt index
-```
-
-On the boat, install the debs with apt (next section).
-
-## Configure
-
-The telemetry CSV is never built in. Pass `--csv`, set `SCOUT_TELEMETRY_CSV`,
-or put it in a `.env` (see `.env.example`). Shell variables override `.env`.
-Relative paths in `.env` are relative to the `.env` file.
-
-## Commands
-
-```sh
-forecast --from 2025-07-23T00:00Z --hours 24            # battery forecast vs what happened
-forecast --from 2025-07-23T00:00Z --hours 24 --plan persist --json out.json
-scout-evaluate                                          # blocked, purged k-fold; writes ./runs/physical/
-scout-data --summary                                    # clean / resample the raw Tether export
-
-scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --arrive-by 2025-07-25T12:00Z --reserve 30
-scout-lowpower set-mission --station 60.50,2.20 --radius 50 --drift-radius 500 --reserve 35
-scout-lowpower run --mavlink tcp:127.0.0.1:5760 --params params.json
-scout-lowpower status
-```
-
-## Low-power mode
-
-`scout-lowpower run` reads the operator's mission (local file, so no shore link
-needed), forecasts the battery for each way of operating, and commands
-ArduPilot Rover over MAVLink: mission upload, AUTO/HOLD, cruise speed
-(`WP_SPEED` + `DO_CHANGE_SPEED`), loiter radius, and optionally a Starlink
-power relay. Decisions, reasons and forecasts go to the log (journald) and to
-`decision.json` / `history.jsonl` in the state directory.
-
-Settings: flags, else `SCOUT_MAVLINK`, `SCOUT_STATE_DIR` (or systemd's
-`$STATE_DIRECTORY`), `SCOUT_MISSION`, `SCOUT_PARAMS`, also read from `.env`.
-
 ## Install on the boat (Debian/Ubuntu, apt)
+
+`scout-lowpower` reads the operator's mission (a local file: no shore link
+needed), forecasts the battery for each way of operating and commands ArduPilot
+over MAVLink. Its decisions and reasons go to journald and to the web page.
 
 Every release (see [Releases](#releases)) publishes one deb per app and the
 apt index for them. Download the latest release's boat debs (`scout` is a
@@ -110,15 +73,11 @@ journalctl -u scout-lowpower -f
 | `scout-forecast` | `forecast`, `scout-data`, `scout-evaluate`; the energy model |
 | `scout-lowpower` | `scout-lowpower`, `scout-lowpower.service`, `/etc/scout/scout.env` (conffile), the `scout` system user |
 | `scout-web` | `scout-web`, `scout-web.service` |
-| `scout-sim` | simulation only, never on the boat: `scout-sim`, `scout-sitl.service` (SITL in docker, started only if docker is installed), `scout-sim.service`, `/etc/scout/sim.env`; drop-ins put the boat units on the simulated clock |
+| `scout-sim` | simulation only, never on the boat (see [Simulation](#simulation-ardupilot-sitl-and-web-page)) |
 
-The packages pin each other with `(= version)`, so apt never mixes releases.
-Code goes in `/usr/lib/python3/dist-packages` (pure Python, standard library
-only: no venv needed), units in `/usr/lib/systemd/system`. A fresh install
-enables and starts the units; an upgrade restarts those that were running and
-keeps your `scout.env` edits; `apt purge` removes config and state
-(`/var/lib/scout-lowpower`). To roll back, install the older release's debs:
-`sudo apt install --allow-downgrades ./scout*_0.1.4_all.deb`.
+The packages pin each other to the same version. An upgrade restarts what was
+running and keeps your `scout.env` edits; `apt purge` removes config and state.
+Roll back by installing an older release's debs with `--allow-downgrades`.
 
 | Unit | Runs | Notes |
 | --- | --- | --- |
@@ -129,25 +88,11 @@ keeps your `scout.env` edits; `apt purge` removes config and state
 
 ## Releases
 
-`.github/workflows/release.yml` runs on every push to `main` (each merged pull
-request) and nowhere else. It bumps the patch version of every app together
-(`packaging/version.py bump patch`), runs the unit tests on Python 3.9, builds
-the wheels and debs (`packaging/build.sh`), and smoke-tests the debs under
-systemd (`packaging/test/smoke.sh`: install via apt, upgrade from the previous
-release, drive a fake autopilot, `kill -9`, add and purge `scout-sim`, purge
-everything). Only if all of that passes does it push `Release vX.Y.Z [skip ci]`
-to `main`, tag `vX.Y.Z`, and publish a GitHub release with the debs, the apt
-index and the wheels. Run it by hand (Actions > release) to bump minor or major.
-If `main` is protected, give it a `RELEASE_TOKEN` secret that may push there.
-
-Locally (Docker; on macOS the debs are built in a Debian container):
-
-```sh
-packaging/version.py                              # current version (all apps agree)
-PYTHON=.venv/bin/python packaging/build.sh        # dist/
-packaging/test/smoke.sh                           # ~1 min; KEEP=1 leaves scout-smoke running
-PREVIOUS=old/debs packaging/test/smoke.sh         # also test the upgrade from old/debs
-```
+Every merge into `main` runs `.github/workflows/release.yml`. It bumps every
+app's version together, runs the tests, builds the wheels and debs,
+smoke-tests the debs under systemd (including an upgrade from the last
+release), and only then tags and publishes a GitHub release. If `main` is
+protected, add a `RELEASE_TOKEN` secret that may push to it.
 
 ## Simulation (ArduPilot SITL) and web page
 
@@ -189,46 +134,35 @@ sudo -u scout scout-lowpower set-mission \
 removes the SITL container (`docker image rm radarku/ardupilot-sitl` frees the
 image too).
 
-### From a checkout (development, any OS with docker)
+### From a checkout (any OS with docker)
 
-```sh
-pip install -r requirements-dev.txt     # includes apps/sim, which never goes on the boat
-apps/sim/run_sitl.sh                    # SITL in docker + scout-sim + scout-lowpower + scout-web
-SIM_RATE=20 apps/sim/run_sitl.sh        # 20x clock: ~4 simulated hours in 12 minutes
-open http://127.0.0.1:8080
-```
-
-The SITL container keeps the rate it was created with: after changing
-`SIM_RATE`, `docker rm -f scout-sitl` first.
+`scripts/quickstart.sh` (see [Quick start](#quick-start)), or run the pieces
+directly with `SIM_RATE=20 apps/sim/run_sitl.sh` after installing.
 
 ### What runs
 
-* **SITL**: the `radarku/ardupilot-sitl` image (ArduPilot 4.0, Rover,
-  `sailboat-motor` boat model), started with `apps/sim/sitl/scout.parm`.
-* **scout-sim** (`apps/sim/`): current (mean + M2 tidal ellipse), wind (gusty,
-  hours-long weather) with hull leeway, and cloud are pushed into SITL as the
-  `SIM_TIDE` drift vector, so ArduPilot's own controllers fight them. Its power
-  model turns speed *through the water* into thruster load, adds hotel and
-  Starlink, computes solar from sun position and cloud, runs the battery, and
-  sends `BATTERY_STATUS` (battery, load, solar) to the service's power link.
-  Its "true" parameters are ~10 % off the fitted ones on purpose.
-* A shared clock (`SCOUT_CLOCK`, from `scout-sim clock`) lets the service and
-  the simulator agree on a simulated July date and rate.
-* **scout-web**: stdlib server, no external assets (works offline on the
-  boat). Shows the current decision and why, battery readings against any
-  earlier forecast, forecast error by lead time against "stays the same",
-  load and solar, and forecasts of historical periods from the telemetry CSV.
-  The page checks for new data every 5 s and redraws only when it changed
-  (the server answers 304 otherwise, cheap over a satellite link). It keeps
-  your choices, waits while you hover a chart, pauses in a background tab, and
-  says when the server can't be reached. The compared forecast defaults to
-  "auto" (made ~3 h before the latest), which moves forward by itself.
+* **SITL:** ArduPilot 4.0 Rover (`radarku/ardupilot-sitl`, `sailboat-motor`
+  hull) with `apps/sim/sitl/scout.parm`.
+* **scout-sim:** current (mean plus tidal ellipse), gusty wind with hull
+  leeway, and cloud, pushed into SITL as drift. It also runs a power model
+  that sends battery, load and solar to the service. Its "true" parameters are
+  about 10 % off the fitted ones on purpose.
+* **scout-web:** the current decision and why, battery against earlier
+  forecasts, forecast error by lead time, load and solar. It updates itself
+  every few seconds (304 when nothing changed), keeps your choices and pauses
+  in a background tab.
 
-## Tests
+## Development
 
 ```sh
-pip install -r requirements-dev.txt
-for d in apps/*/tests; do python -m unittest discover -s "$d" || break; done
+scripts/quickstart.sh --install-only    # .venv with every app, editable
+scripts/quickstart.sh --test            # every app's unit tests
+packaging/build.sh                      # dist/: wheels, debs and an apt index
+packaging/test/smoke.sh                 # the debs under systemd in docker (~1 min)
 ```
 
-See `REPORT.md` for findings and accuracy, and `AGENTS.md` for project conventions.
+The forecast commands (`forecast`, `scout-evaluate`, `scout-data`) need the
+private telemetry CSV: pass `--csv` or set `SCOUT_TELEMETRY_CSV` (also read
+from `.env`, see `.env.example`). The simulation doesn't need it.
+
+Findings and accuracy: [REPORT.md](REPORT.md). Conventions: [AGENTS.md](AGENTS.md).
