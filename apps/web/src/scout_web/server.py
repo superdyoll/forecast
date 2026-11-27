@@ -59,9 +59,9 @@ def read_history(state_dir: Path) -> list[dict]:
     return rows
 
 
-def score(rows: list[dict]) -> dict:
-    """MAE and bias of past forecasts at each lead time, against the readings
-    that followed, with 'battery stays the same' as the baseline."""
+def matcher(rows: list[dict]):
+    """actual_at(t): battery_pct of the reading nearest t, if within
+    MATCH_S, else None. `rows` sorted by time, as read_history gives them."""
     times = [r["_t"] for r in rows]
 
     def actual_at(t):
@@ -74,6 +74,13 @@ def score(rows: list[dict]) -> dict:
                     best = (d, rows[j]["battery_pct"])
         return None if best is None else best[1]
 
+    return actual_at
+
+
+def score(rows: list[dict]) -> dict:
+    """MAE and bias of past forecasts at each lead time, against the readings
+    that followed, with 'battery stays the same' as the baseline."""
+    actual_at = matcher(rows)
     acc = {h: {"err": [], "base": []} for h in LEADS_H}
     for r in rows:
         made = r["_t"]
@@ -118,8 +125,14 @@ def live(state_dir: Path, hours: float) -> dict:
             last = r["_t"]
     if made and kept[-1] is not made[-1]:
         kept.append(made[-1])  # always the latest
+    # Each point: [time, forecast %, the reading that followed or None].
+    actual_at = matcher(every)
     forecasts = [
-        {"made": r["time"], "battery_pct": r["battery_pct"], "points": r["forecast"]}
+        {
+            "made": r["time"],
+            "battery_pct": r["battery_pct"],
+            "points": [[t, pct, actual_at(parse_iso(t))] for t, pct in r["forecast"]],
+        }
         for r in kept
     ]
     keep = (

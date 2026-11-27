@@ -301,9 +301,9 @@ function drawBattery() {
     yLabel: "Battery %", unit: "%", refs: reserve != null ? [{ y: reserve, label: `reserve ${reserve}%` }] : [],
     nowT: actual.length ? actual[actual.length - 1][0] : null,
   });
-  // Nearest reading within 10 min, as the server scores them (MATCH_S).
-  const near = (t) => { let b = null; for (const p of actual) if (Math.abs(p[0] - t) <= 6e5 && (!b || Math.abs(p[0] - t) < Math.abs(b[0] - t))) b = p; return b && b[1]; };
-  table($("battery-table"), ["Time (UTC)", "Forecast %", "Actual %"], fc.map((p) => [fmtTime(new Date(p[0])), fmt(p[1]), fmt(near(p[0]))]));
+  // The server pairs each forecast point with the reading that followed (points[i][2]).
+  const rows = f ? [[f.made, f.battery_pct, f.battery_pct], ...f.points] : [];
+  table($("battery-table"), ["Time (UTC)", "Forecast %", "Actual %"], rows.map((p) => [fmtTime(new Date(p[0])), fmt(p[1]), fmt(p[2])]));
 }
 
 function drawPower() {

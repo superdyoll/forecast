@@ -50,6 +50,73 @@ class Scoring(unittest.TestCase):
             self.assertEqual(live["history"], [])
 
 
+class History(unittest.TestCase):
+    """What /api/live builds from the service's history files."""
+
+    def rows(self, minutes, start=T0):
+        """A reading every `minutes` for 6 h, each with an hourly forecast."""
+        out = []
+        for k in range(6 * 60 // minutes):
+            t = start + timedelta(minutes=k * minutes)
+            fc = [[(t + timedelta(hours=h)).isoformat(), 60.0 - h] for h in (1, 2)]
+            out.append(
+                {"time": t.isoformat(), "battery_pct": 60.0 - k / 10, "forecast": fc}
+            )
+        return out
+
+    def test_rotated_file_is_read_first_and_merged_in_order(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            rows = self.rows(10)
+            with open(d / "history.jsonl.1", "w") as fh:  # the older half
+                fh.writelines(json.dumps(r) + "\n" for r in rows[:18])
+            history(d, rows[18:])
+            got = web.read_history(d)
+            self.assertEqual([r["time"] for r in got], [r["time"] for r in rows])
+
+    def test_forecasts_thinned_to_one_per_30_min_plus_the_latest(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            rows = self.rows(5)[:-1]  # every 5 min from 06:00, the last at 11:50
+            history(d, rows)
+            made = [f["made"] for f in web.live(d, 48)["forecasts"]]
+            self.assertEqual(
+                made[:3], [rows[0]["time"], rows[6]["time"], rows[12]["time"]]
+            )
+            self.assertEqual(made[-1], rows[-1]["time"])  # always the latest
+            self.assertEqual(len(made), 12 + 1)
+
+    def test_each_forecast_point_carries_the_reading_that_followed(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            rows = self.rows(7)  # readings never land exactly on the hour
+            history(d, rows)
+            f = web.live(d, 48)["forecasts"][0]
+            (t1, fc1, actual1), (t2, _, _) = f["points"]
+            self.assertEqual(fc1, 59.0)
+            # 07:00 has readings at 06:56 and 07:03: the nearer one, 07:03.
+            want = next(r for r in rows if r["time"].startswith("2025-07-23T07:03"))
+            self.assertEqual(actual1, want["battery_pct"])
+            late = web.live(d, 48)["forecasts"][-1]
+            self.assertIsNone(late["points"][-1][2])  # after the last reading
+
+    def test_hours_limits_the_history_not_the_scoring(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            history(d, self.rows(10))
+            short, full = web.live(d, 1), web.live(d, 48)
+            self.assertLess(len(short["history"]), len(full["history"]))
+            self.assertEqual(short["errors"], full["errors"])
+
+    def test_matcher_ignores_readings_more_than_10_min_away(self):
+        rows = [{"_t": T0 + timedelta(minutes=m), "battery_pct": m} for m in (0, 30)]
+        at = web.matcher(rows)
+        self.assertEqual(at(T0 + timedelta(minutes=9)), 0)
+        self.assertEqual(at(T0 + timedelta(minutes=21)), 30)
+        self.assertIsNone(at(T0 + timedelta(minutes=15)))
+        self.assertIsNone(web.matcher([])(T0))
+
+
 class Server:
     """scout-web on a free port, for one test."""
 
