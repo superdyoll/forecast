@@ -12,7 +12,8 @@ with ``(= version)`` so apt never mixes releases:
   scout-forecast  energy model + `forecast`, `scout-data`, `scout-evaluate`
   scout-lowpower  the boat service: unit, /etc/scout/scout.env, `scout` user
   scout-web       the web page and its unit
-  scout-sim       simulation only (SITL in docker + scout-sim); never on the boat
+  scout-sim       simulation only (SITL in docker + scout-sim); never on the boat.
+                  Depends on docker; pulls the SITL image on first run.
   scout           metapackage for the boat: forecast + lowpower + web
 
 The apps are pure Python and standard library only, so they're unpacked into
@@ -128,8 +129,14 @@ PACKAGES = {
     ),
     "scout-sim": dict(
         wheel="scout_sim",
-        depends=[PY, "scout-forecast (= {v})", "scout-lowpower (= {v})"],
-        recommends=["docker.io | docker-ce"],
+        # SITL runs in docker; apt refuses to install without it. The image
+        # is pulled by scout-sitl.service on first run.
+        depends=[
+            PY,
+            "scout-forecast (= {v})",
+            "scout-lowpower (= {v})",
+            "docker.io | docker-ce",
+        ],
         description="Scout simulation around ArduPilot SITL (not for the boat)",
         units=["scout-sitl.service", "scout-sim.service"],
         # SITL pulls and runs a docker image: only start it where docker exists.
@@ -143,7 +150,13 @@ PACKAGES = {
         postinst=SIM_ENV,
         # The drop-ins change the boat services' environment: restart them.
         restart_others=["scout-lowpower.service", "scout-web.service"],
-        purge="rm -f /etc/scout/sim.env\nrm -rf /var/lib/scout-sim",
+        # The SITL container goes; its (large) image stays for a reinstall.
+        purge=(
+            "rm -f /etc/scout/sim.env\nrm -rf /var/lib/scout-sim\n"
+            "if command -v docker >/dev/null; then\n"
+            "  docker rm -f scout-sitl >/dev/null 2>&1 || true\n"
+            "fi"
+        ),
     ),
     "scout": dict(
         depends=[

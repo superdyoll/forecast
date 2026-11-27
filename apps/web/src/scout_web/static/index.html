@@ -48,6 +48,7 @@ h2 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
 .tile .note { color: var(--text-secondary); font-size: 12px; }
 .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+#live { display: inline-flex; align-items: center; gap: 6px; }
 ul.reasons { margin: 8px 0 0; padding-left: 18px; }
 .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 8px 0; color: var(--text-secondary); font-size: 13px; }
 select, input, button { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--axis); border-radius: 6px; padding: 4px 8px; }
@@ -81,6 +82,7 @@ details table { margin-top: 6px; color: var(--text-primary); }
     <h1>Scout · low-power mode</h1>
     <span class="sub" id="updated">loading…</span>
     <span class="badge" id="ap"></span>
+    <span class="sub" id="live" role="status" aria-live="polite"></span>
     <span style="flex:1"></span>
     <select id="theme" aria-label="Theme"><option value="">System theme</option><option value="light">Light</option><option value="dark">Dark</option></select>
   </header>
@@ -224,8 +226,10 @@ function lineChart(host, { series, yLabel, yMin, yMax, refs = [], nowT = null, u
     const px = ((X(t)) / W) * r.width;
     tip.style.left = Math.min(px + 12, r.width - tip.offsetWidth - 4) + "px"; tip.style.top = "8px";
   };
-  const leave = () => { cross.setAttribute("visibility", "hidden"); dots.forEach((d) => d.setAttribute("visibility", "hidden")); tip.style.display = "none"; };
-  hit.addEventListener("pointermove", move); hit.addEventListener("pointerleave", leave);
+  const leave = () => { cross.setAttribute("visibility", "hidden"); dots.forEach((d) => d.setAttribute("visibility", "hidden")); tip.style.display = "none"; hoverEnd(); };
+  // Moving counts too: a chart redrawn under a resting pointer gets no pointerenter.
+  hit.addEventListener("pointermove", (ev) => { HOVER = true; move(ev); });
+  hit.addEventListener("pointerleave", leave);
 }
 
 function table(host, headers, rows) {
@@ -237,6 +241,16 @@ function table(host, headers, rows) {
 
 const T = (iso) => Date.parse(iso);
 let LIVE = null;
+// Live updates: poll every POLL_MS; the server answers 304 when nothing
+// changed. Redraws wait while the pointer is on a chart (so a tooltip isn't
+// wiped mid-read) and polling pauses while the tab is hidden.
+const POLL_MS = 5000;
+let ETAG = null, IN_FLIGHT = false, LAST_OK = 0, LAST_ERR = null, HOVER = false, PENDING = false;
+// "auto": the forecast made ~3 h before the latest, so it overlaps what
+// happened and moves forward as new decisions arrive. "latest", or the
+// `made` time of a forecast the user picked.
+let MADE = "auto";
+function hoverEnd() { HOVER = false; if (PENDING) { PENDING = false; renderLive(); } }
 
 function renderLive() {
   const d = LIVE, dec = d.decision, plan = dec && dec.plan;
@@ -257,21 +271,28 @@ function renderLive() {
   $("plan-sub").textContent = plan ? `Decided ${fmtTime(new Date(plan.decided_at))} UTC` : "";
   $("reasons").replaceChildren(...(plan?.reasons || ["Waiting for telemetry and a mission."]).map((r) => el("li", {}, r)));
 
-  // Forecast selector: latest, or one made N hours ago.
-  const sel = $("made"), prev = sel.value;
-  sel.replaceChildren(...d.forecasts.slice().reverse().map((f, i) => el("option", { value: f.made }, (i === 0 ? "latest: " : "") + fmtTime(new Date(f.made)))));
-  if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
-  else if (d.forecasts.length) {
-    // Default: the forecast made ~3 h before the latest reading, so it overlaps what happened.
-    const lastT = T(d.forecasts[d.forecasts.length - 1].made) - 3 * 3.6e6;
-    const pick = d.forecasts.reduce((a, f) => (Math.abs(T(f.made) - lastT) < Math.abs(T(a.made) - lastT) ? f : a));
-    sel.value = pick.made;
-  }
+  // Forecast selector. A pinned forecast that has left the window falls back to auto.
+  if (MADE !== "auto" && MADE !== "latest" && !d.forecasts.some((f) => f.made === MADE)) MADE = "auto";
+  const sel = $("made"), fs = d.forecasts, auto = pickForecast("auto"), latest = fs[fs.length - 1];
+  sel.replaceChildren(
+    el("option", { value: "auto" }, "auto (~3 h before latest)" + (auto ? ": " + fmtTime(new Date(auto.made)) : "")),
+    el("option", { value: "latest" }, "latest" + (latest ? ": " + fmtTime(new Date(latest.made)) : "")),
+    ...fs.slice().reverse().map((f) => el("option", { value: f.made }, fmtTime(new Date(f.made)))));
+  sel.value = MADE;
   drawBattery(); drawPower(); drawErrors();
 }
 
+function pickForecast(choice) {
+  const fs = LIVE.forecasts;
+  if (!fs.length) return null;
+  if (choice === "latest") return fs[fs.length - 1];
+  if (choice !== "auto") return fs.find((f) => f.made === choice) || null;
+  const target = T(fs[fs.length - 1].made) - 3 * 3.6e6;
+  return fs.reduce((a, f) => (Math.abs(T(f.made) - target) < Math.abs(T(a.made) - target) ? f : a));
+}
+
 function drawBattery() {
-  const d = LIVE, f = d.forecasts.find((x) => x.made === $("made").value) || d.forecasts[d.forecasts.length - 1];
+  const d = LIVE, f = pickForecast(MADE);
   const actual = d.history.map((r) => [T(r.time), r.battery_pct]);
   const fc = f ? [[T(f.made), f.battery_pct], ...f.points.map((p) => [T(p[0]), p[1]])] : [];
   const reserve = d.decision?.mission?.min_reserve_pct;
@@ -299,13 +320,38 @@ function drawErrors() {
     rows.map(([k, v]) => [k, fmt(v.mae, 2), fmt(v.mae_persistence, 2), (v.bias > 0 ? "+" : "") + fmt(v.bias, 2), String(v.n)]));
 }
 
-async function refresh() {
+async function refresh(force = false) {
+  if (IN_FLIGHT || (document.hidden && !force)) return;
+  IN_FLIGHT = true;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 10000);
   try {
-    const r = await fetch(`/api/live?hours=${$("hours").value}`);
-    LIVE = await r.json(); renderLive();
-  } catch (err) { $("updated").textContent = "server unreachable: " + err; }
+    const headers = !force && ETAG ? { "If-None-Match": ETAG } : {};
+    const r = await fetch(`/api/live?hours=${$("hours").value}`, { headers, signal: ctl.signal, cache: "no-store" });
+    if (r.status !== 304) {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      LIVE = await r.json(); ETAG = r.headers.get("ETag");
+      if (HOVER) PENDING = true; else renderLive();
+    }
+    LAST_OK = Date.now(); LAST_ERR = null;
+  } catch (err) {
+    LAST_ERR = err.name === "AbortError" ? "timed out" : (err.message || String(err));
+  } finally { clearTimeout(timer); IN_FLIGHT = false; showLive(); }
 }
-$("made").onchange = drawBattery; $("hours").onchange = refresh;
+
+// "live · checked 3 s ago", or how long the server has been unreachable;
+// the last data stays on screen either way.
+function showLive() {
+  const s = $("live"); s.replaceChildren();
+  const ago = LAST_OK ? Math.round((Date.now() - LAST_OK) / 1000) : null;
+  const ok = !LAST_ERR;
+  s.append(el("span", { class: "dot", style: `background: var(${ok ? "--good" : "--critical"})` }),
+    document.createTextNode(ok ? `live · checked ${ago ?? 0} s ago`
+      : `can't reach the server (${LAST_ERR})${ago != null ? ` · last data ${ago} s ago` : ""} · retrying`));
+}
+
+$("made").onchange = () => { MADE = $("made").value; drawBattery(); };
+$("hours").onchange = () => refresh(true);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(true); });
 
 // Hindcast from telemetry (only when the server has a CSV).
 async function setupHindcast() {
@@ -331,7 +377,7 @@ async function setupHindcast() {
   };
 }
 
-refresh(); setInterval(refresh, 30000); setupHindcast();
+refresh(true); setInterval(refresh, POLL_MS); setInterval(showLive, 1000); setupHindcast();
 </script>
 </body>
 </html>

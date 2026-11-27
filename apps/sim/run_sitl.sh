@@ -24,19 +24,27 @@ CONTAINER="${SIM_CONTAINER:-scout-sitl}"
 
 mkdir -p "$SIM_WORK/state"
 export SCOUT_STATE_DIR="$SIM_WORK/state"
-export SCOUT_CLOCK="$("$PYTHON" -m scout_sim.run clock --start "$SIM_START" --rate "$SIM_RATE")"
+SCOUT_CLOCK="$("$PYTHON" -m scout_sim.run clock --start "$SIM_START" --rate "$SIM_RATE")"
+export SCOUT_CLOCK
 echo "clock: $SCOUT_CLOCK   output: $SIM_WORK"
 
 # --- ArduPilot SITL: Rover, motor-sailboat model (the 4.0 boat model with water current)
+# Its speedup is fixed when the container is created, so a container made for
+# another SIM_RATE is recreated (it is labelled with its rate).
+rate_of() { "$DOCKER" container inspect -f '{{ index .Config.Labels "scout.rate" }}' "$CONTAINER" 2>/dev/null; }
 if "$DOCKER" container inspect "$CONTAINER" >/dev/null 2>&1 \
+   && [ "$(rate_of)" = "$SIM_RATE" ] \
    && "$DOCKER" start "$CONTAINER" >/dev/null && sleep 2 \
    && [ "$("$DOCKER" container inspect -f '{{.State.Running}}' "$CONTAINER")" = true ]; then
   :
 else
-  # Missing, or won't restart (seen with amd64 emulation on arm64): recreate.
-  "$DOCKER" container inspect "$CONTAINER" >/dev/null 2>&1 && "$DOCKER" rm -f "$CONTAINER" >/dev/null
-  "$DOCKER" run -d --name "$CONTAINER" --platform linux/amd64 \
-    -p 5760:5760 -p 5762:5762 -p 5763:5763 -v "$here/sitl:/scout:ro" \
+  # Missing, made for another rate, or won't restart (seen with amd64
+  # emulation on arm64): recreate.
+  if "$DOCKER" container inspect "$CONTAINER" >/dev/null 2>&1; then
+    "$DOCKER" rm -f "$CONTAINER" >/dev/null
+  fi
+  "$DOCKER" run -d --name "$CONTAINER" --label "scout.rate=$SIM_RATE" --platform linux/amd64 \
+    -p 127.0.0.1:5760:5760 -p 127.0.0.1:5762:5762 -p 127.0.0.1:5763:5763 -v "$here/sitl:/scout:ro" \
     --entrypoint /ardupilot/build/sitl/bin/ardurover radarku/ardupilot-sitl \
     -S -I0 --model sailboat-motor --speedup "$SIM_RATE" --home 60.2,2.2,0,0 \
     --defaults /ardupilot/Tools/autotest/default_params/rover.parm,/ardupilot/Tools/autotest/default_params/sailboat-motor.parm,/scout/scout.parm \

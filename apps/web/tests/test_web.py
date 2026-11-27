@@ -50,5 +50,48 @@ class Scoring(unittest.TestCase):
             self.assertEqual(live["history"], [])
 
 
+class LivePolling(unittest.TestCase):
+    """The page polls /api/live every few seconds: unchanged data is a 304."""
+
+    def test_etag_answers_304_until_the_data_changes(self):
+        import threading
+        import urllib.error
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            history(d, [{"time": T0.isoformat(), "battery_pct": 70}])
+            srv = ThreadingHTTPServer(
+                ("127.0.0.1", 0), web.make_handler(web.App(d, None))
+            )
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            url = f"http://127.0.0.1:{srv.server_address[1]}/api/live"
+
+            def get(etag=None):
+                req = urllib.request.Request(url)
+                if etag:
+                    req.add_header("If-None-Match", etag)
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as r:
+                        return r.status, r.headers["ETag"], r.read()
+                except urllib.error.HTTPError as e:
+                    return e.code, e.headers["ETag"], e.read()
+
+            try:
+                code, tag, body = get()
+                self.assertEqual(code, 200)
+                self.assertTrue(json.loads(body)["history"])
+                self.assertEqual(get(tag)[:1], (304,))
+                self.assertEqual(get(tag)[2], b"")
+                history(d, [{"time": T0.isoformat(), "battery_pct": 69}])
+                code, new_tag, _ = get(tag)
+                self.assertEqual(code, 200)
+                self.assertNotEqual(new_tag, tag)
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
+
 if __name__ == "__main__":
     unittest.main()
