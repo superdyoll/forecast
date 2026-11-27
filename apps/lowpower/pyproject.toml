@@ -9,7 +9,7 @@ dynamic = ["version"]
 description = "Low-power mission mode for Scout: energy-aware planner and MAVLink service for ArduPilot"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["scout-forecast==0.1.1"]  # the energy model; otherwise standard library only
+dependencies = ["scout-forecast==0.1.2"]  # the energy model; otherwise standard library only
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: POSIX :: Linux",
