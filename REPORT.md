@@ -7,7 +7,8 @@ systemd).
 
 All telemetry figures come from `scout_telemetry_2025-07.csv` (17 days, 24,674
 messages). Simulation figures come from runs against ArduPilot 4.0 SITL and are
-labelled as such.
+labelled as such. Days-long scenarios (storms) use `scout-sim fast`: the same
+environment, power truth and planner without SITL.
 
 ## Summary
 
@@ -23,9 +24,16 @@ labelled as such.
 - **The low-power mode works end to end in SITL:** it uploads the mission, holds
   speed, keeps the reserve, and survives autopilot restarts, link loss, its own
   crashes and operator overrides.
-- **Biggest open issue:** ArduPilot holds speed *over ground*, but the energy model
-  and the plan are in speed *through the water*. With current, the plan's power
-  and arrival time can be badly wrong (see [Open issues](#open-issues)).
+- **Current is now in the model.** ArduPilot holds speed *over ground*; power
+  depends on speed *through the water*. The service estimates the current and the
+  hull's real top speed from measured propulsion power. In one SITL run, the
+  1-hour forecast went from 7.6 points pessimistic to within 1 point. In another,
+  ArduPilot went faster than commanded and the forecast was optimistic: that's
+  the top open issue (see
+  [Current](#current-speed-over-ground-vs-through-the-water)).
+- **A 3-day storm used to run the battery flat.** Four fixes keep a boat that
+  starts at 70 % above its reserve; weaker starts still dip below it, which only
+  load-shedding or a weather forecast can fix (see [Storms](#storms)).
 
 ## What the telemetry says
 
@@ -113,7 +121,12 @@ Starlink duty, plus hold, drift or pause.
 - **With a deadline:** the feasible speed that arrives in time with the most
   battery to spare. **The reserve outranks the deadline.**
 - **Nothing feasible:** pause with motors off and let the sun recharge.
-- **At the last waypoint:** hold (loiter), or drift and motor back.
+- **At the last waypoint or on station:** hold (loiter, stemming the current) if
+  affordable, else drift with the motors off until holding is affordable again.
+  Motoring back costs at least as much as holding (power grows with the cube of
+  speed), so a boat that can't afford to hold can't afford to return either.
+- **Speeds are over ground.** Each leg is priced with the estimated current: the
+  water speed it takes, and the ground speed the hull can actually reach.
 
 The decision logic (`planner.py`) is pure and unit-tested; MAVLink I/O and recovery
 live in `service.py`. Every decision, its reasons and its forecast go to journald
@@ -131,8 +144,8 @@ against the readings that followed.
   simulated.
 - An arrival flipped back to transit.
 - A stale waypoint index declared a new mission arrived.
-- The simulator crashed when there was no `params.json` (it now uses defaults, as
-  the service does).
+- The simulator crashed when there was no `params.json` (it now uses the shipped
+  fit, as the service does).
 
 **Recovery, under systemd** (journals in `docs/evidence/`):
 - **Autopilot killed mid-mission:** it saw the heartbeat loss at +5 s and the link
@@ -141,10 +154,27 @@ against the readings that followed.
 - **`kill -9` of the service:** systemd restarted it in 5 s.
 - **A hung service (`SIGSTOP`):** the 30 s watchdog restarted it.
 
-**A race the CI runner exposed, fixed:** an autopilot reboot shorter than the 5 s
-heartbeat timeout is only visible from the boot clock. If heartbeats arrived first,
-the service recorded the rebooted autopilot as "disarmed on purpose" and didn't
-re-arm. It now holds the armed state after a reconnect until the boot clock arrives.
+**Races in quick autopilot reboots, fixed.** A reboot shorter than the 5 s
+heartbeat timeout shows only in the boot clock. If heartbeats arrived first, the
+service took the rebooted autopilot's state as the operator's: first "disarmed on
+purpose" (no re-arm; found by CI), then "switched to MANUAL" (an override; found
+while adding the storm tests). After a reconnect it now neither records the armed
+state nor judges overrides nor enforces its plan until the boot clock arrives.
+
+**Bugs the storm and current work exposed, fixed:**
+- **Safety:** below the battery floor the planner said "propulsion stopped" but
+  still motored back to station (the drift option's return flag). Now drift is
+  motors off, always.
+- Motoring back against a gale was priced at 15 % of the time; it was 100 %.
+- The current estimate averaged 10–15 minutes, but Starlink comes in 15-minute
+  sessions: a window could be all-on or all-off (±15 W, more than low-speed
+  propulsion). It now averages a whole Starlink cycle (1 hour).
+- A current faster than the boat meant pausing, i.e. drifting downstream (10 km
+  in one run). It now motors into it if that's affordable for half a tide (6 h).
+- Today's peak tidal current was assumed to last the whole forecast; it now
+  relaxes to its daily mean over 3 hours.
+- `quickstart.sh` reused a SITL container whose boat had already finished the
+  route; it now starts SITL fresh each run.
 
 ## Packaging
 
@@ -160,29 +190,123 @@ Every merge into `main` runs `.github/workflows/release.yml`, in order:
    drive a fake autopilot, `kill -9`, purge.
 5. Only then publish a GitHub release.
 
+## Current: speed over ground vs through the water
+
+ArduPilot holds the commanded speed over ground. Power depends on speed through
+the water. The difference is the current (plus leeway), which Scout has no sensor
+for. The load channel measures propulsion power, so the service (`current.py`):
+- reads speed through the water off the propulsion curve and, with the heading
+  and ground velocity, estimates the current (motors off: the drift is the
+  current);
+- learns the hull's real top speed: making clearly less over ground than
+  commanded means it's at its limit;
+- plans each leg with that current, relaxing to its daily mean over 3 hours.
+
+The fitted model's top speed through the water is 0.85 m/s, read off the point
+where AUTO power stops rising (about 73 W). It now ships with the package
+(`fitted_params.json`) and as `/etc/scout/params.json` in the deb, so a clone or
+an install without the private data uses the fit, not generic defaults.
+
+**SITL, 20 ×, demo transit (6.7 km, 4 h deadline), 1-hour forecast error:**
+
+| Run | Current estimate error | 1 h error / bias | Stays the same |
+| --- | --- | --- | --- |
+| Before (deb install, generic defaults) | none | 7.96 / −7.62 | 2.18 |
+| Current estimated, 10-min window | 0.27 m/s | 7.04 / −7.04 | 3.17 |
+| + top speed learnt, 1-hour window | 0.12 m/s | 1.12 / −0.75 | 1.90 |
+| Final, at 5 × (SITL keeps pace; heading averaged) | 0.23 m/s | 3.53 / +3.51 | 2.69 |
+
+The 3-hour error in the third run was 0.64 points against 6.59 for "stays the
+same". **Caveat:** on Apple silicon SITL is emulated and runs at about 5.5 × at
+most, so at 20 × the boat lags the clock. Speeds are right but progress looks
+slow, so arrival times in those runs aren't meaningful. `scout-sim` now warns
+about this, and `quickstart.sh` uses 5 × on arm64. At 5 × the boat arrived at
+09:20 against the 10:00 deadline. But its forecast turned optimistic, by
++3.5 points at 1 h and +7.2 at 3 h. From 08:00, on the legs across the
+current, ArduPilot made 0.7–0.8 m/s over ground for a 0.3–0.4 m/s command, at
+0.93 m/s through the water and 100–155 W. The planner had priced the command
+at a few watts. See [Open issues](#open-issues).
+
+**Fast simulation, the same planner with and without the current estimate**
+(`scout-sim fast`, 0.75–2 days; error at 3 hours):
+
+| Scenario | Without | With | Stays the same |
+| --- | --- | --- | --- |
+| Transit, seeds 1/2/3 (all on time) | 1.89 / 2.66 / 1.60 | 1.68 / 2.71 / 1.42 | 5.1 / 3.1 / 3.5 |
+| Transit, slow hull (0.3 m/s), bias | −1.44 | −0.55 | 4.5 |
+| Station-keeping, 2 days, bias | +0.55 | +0.37 | 4.3 |
+
+Over a few hours the gain is modest. The large gains in SITL come from
+what the fast mode's simple boat doesn't have: a hull far slower than the model
+believed.
+
+## Storms
+
+`scout-sim fast --mission station --storm 24:72`: five days on station with an
+Atlantic low from day 2 to day 4. Solar falls to 8 % of clear sky. Wind rises to
+20 m/s, which adds about 0.6 m/s of leeway drift on top of the current. A calm
+five days from 70 % never goes below 68.7 %.
+
+| Planner | Start 70 %: low / hours below reserve | Start 55 % | Start 40 % | 12 h bias |
+| --- | --- | --- | --- | --- |
+| Before | 0 % / 74 h | 0 % / 81 h | – | +10.6 |
+| Floor bug, drift and Starlink fixed | 27.8 % / 4.5 h | 21.0 % / 27 h | 16.8 % / 36 h | +3.0 |
+| + 48 h look-ahead, bad weather persists 96 h, current relaxes | **31.2 % / 0 h** | 23.4 % / 14 h | 13.9 % / 42 h | +4.1 |
+
+The reserve is 30 %. What went wrong first:
+1. **The battery floor didn't stop the motors.** This was the safety bug above.
+2. **It kept motoring back against a drift it couldn't beat.**
+3. **The simulator ignored the planner's Starlink advice.** It now follows it, as
+   a relay would.
+4. **The planner expected the sun back within 12 hours,** so it held station into
+   the gale on day 1.
+
+What helped most was the longer look-ahead. With 24 hours it couldn't see that
+holding into a gale on day 1 leaves nothing for day 3. A weaker start still dips
+below the reserve. With the motors off, the hotel load and minimal Starlink
+(about 12 W) take about 36 points over 3 sunless days, more than a 40–55 %
+battery has above the reserve.
+
+**Suggested model changes for storms,** most valuable first:
+1. **Use a weather forecast.** A cloud and wind forecast (e.g. MET Norway or ECMWF
+   over Starlink, cached for Iridium-only periods) would replace the persistence
+   guess. The boat could then charge to full before the storm, skip holding into
+   it, and cut Starlink early.
+2. **Check the reserve against a bad-weather case,** e.g. the 10th-percentile
+   solar for the season. Keep the expected case for ETAs. The persistence rule is
+   a crude version of this.
+3. **Add a survival load plan.** Starlink fully off (Iridium only) and payloads
+   and compute asleep: about 5 W was seen disarmed on 07-14, against about 12 W
+   now. Over 3 days that's about 20 points, the gap between 55 % and surviving.
+4. **Let the station radius grow with the weather.** Drift with the motors off in
+   a gale and return after it: propulsion is cubic, so returning in calm water is
+   far cheaper.
+5. **Model leeway separately from the current.** In a gale leeway dominates and
+   follows the wind, not the tide; a wind forecast predicts it.
+6. **Check the battery model below 28 %.** The storm runs went to 11–14 %, outside
+   the range the capacity and sag were fitted on. Voltage falls faster near empty.
+
 ## Open issues
 
-1. **Speed over ground vs through the water.** ArduPilot's speed target is over
-   ground; the model's power and ETA assume speed through the water. In one 20×
-   simulation run (deb install, `--arrive-in 4`), a following current of about
-   0.45 m/s gave 0.7 m/s over ground for 0.2–0.3 m/s through the water.
-   - **Power:** the boat used far less than planned. The battery rose 71 → 82 %
-     while the forecast was 7.6 points pessimistic at 1 hour.
-   - **Arrival:** SITL's hull tops out at about 0.8 m/s through the water. The
-     planner's 1.2 m/s was unreachable, and the boat finished about 4 hours late.
-     It reported this itself ("deadline can't be met … arrives 4.2 h late").
-   - **Fix:** plan in through-water speed, using a current estimate (SOG minus
-     commanded speed, or a current feed). Learn the reachable top speed from
-     telemetry.
-2. **Defaults when there's no fitted model.** Without `/etc/scout/params.json` the
-   service uses built-in defaults: 1,900 Wh, 1.2 points per A and γ = 1. These are
-   further from the fitted values (2,200 Wh, 0.9, 1.5) than they need to be. Making
-   the defaults the published fitted values would help any install without the
-   private data.
-3. **State of charge.** Capacity is in Wh per 100 points of a voltage reading.
+1. **The autopilot doesn't always hold the commanded speed.** In the 5 × SITL run
+   above, ArduPilot accepted `DO_CHANGE_SPEED` / `WP_SPEED` of 0.3–0.4 m/s but made
+   0.7–0.8 m/s over ground, at 100–155 W. That's either SITL's `sailboat-motor`
+   tuning or something about these legs across the current. The planner assumes
+   ground speed = command.
+   - **Next:** check the speed controller and `CRUISE_SPEED` / `CRUISE_THROTTLE`
+     in SITL. Then learn achieved against commanded ground speed (and power)
+     from telemetry, as the top speed already is, and price with what the boat
+     actually does.
+2. **State of charge.** Capacity is in Wh per 100 points of a voltage reading.
    Calibrating it needs a coulomb-counted charge–discharge cycle and the battery
    chemistry. If the battery is LiFePO4, voltage barely moves across most of its
    charge.
+3. **The current estimate needs the load channel and heading.** On Iridium-only
+   telemetry ashore it can't be checked, though the boat measures both onboard. It
+   also lumps leeway in with the current.
+4. **Arrival latches near the end only.** A boat that drifts beyond the drift
+   radius after arriving reads as "not arrived" and plans a transit back. That's
+   correct, but its 12-hour forecast in a storm was optimistic by about 6 points.
 
 **Questions for the Scout team:**
 - What are the battery chemistry and capacity?
@@ -202,4 +326,5 @@ The telemetry CSV is private and never in the repository. With it set in `.env`
 (`SCOUT_TELEMETRY_CSV`), `scout-evaluate` reruns the cross-validation and `forecast`
 runs single forecasts. The LSTM experiment is `python3 -m model.lstm.train_lstm`;
 its run is `20261126T192216Z`. The simulation needs no private data:
-`scripts/quickstart.sh`.
+`scripts/quickstart.sh` (SITL), and `scout-sim fast` for the scenarios above
+(`--seed`, `--hull-top-stw`, `--storm`, `--no-current-estimate`).

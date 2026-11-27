@@ -9,6 +9,10 @@
   mean-reverting, clipped to [0.05, 1]. Its average matches the fitted
   cloud factor (~0.6).
 
+* Storm (optional): from storm_start_h for storm_hours, ramping in and out
+  over storm_ramp_h, cloud falls to storm_cloud and wind rises to
+  storm_wind_ms (an Atlantic low: days of overcast and gales).
+
 Drift (current + leeway) is what the boat feels as SIM_TIDE in SITL.
 Vectors are (north, east) in m/s, pointing where the water/wind goes.
 """
@@ -40,6 +44,11 @@ class EnvConfig:
     cloud_sd: float = 0.25
     cloud_tau_h: float = 5.0
     days: int = 40
+    storm_start_h: float | None = None  # hours after the start
+    storm_hours: float = 72.0
+    storm_ramp_h: float = 6.0
+    storm_cloud: float = 0.08  # fraction of clear-sky solar under the storm
+    storm_wind_ms: float = 20.0
 
 
 class Environment:
@@ -69,10 +78,24 @@ class Environment:
         m = math.radians(c.current_mean_toward_deg)
         return n + c.current_mean_ms * math.cos(m), e + c.current_mean_ms * math.sin(m)
 
+    def storm(self, t: datetime) -> float:
+        """How much of the storm is on at t: 0 (none) to 1 (full)."""
+        c = self.cfg
+        if c.storm_start_h is None:
+            return 0.0
+        h = self._hours(t) - c.storm_start_h
+        if h <= 0 or h >= c.storm_hours:
+            return 0.0
+        ramp = max(c.storm_ramp_h, 1e-6)
+        return min(1.0, h / ramp, (c.storm_hours - h) / ramp)
+
     def wind(self, t: datetime) -> tuple[float, float]:
         """(speed m/s, direction it blows FROM, degrees)."""
         h = self._hours(t)
-        return max(0.0, _interp(self._wind_spd, h)), _interp(self._wind_dir, h) % 360
+        spd = max(0.0, _interp(self._wind_spd, h))
+        k = self.storm(t)
+        spd = spd * (1 - k) + self.cfg.storm_wind_ms * k
+        return spd, _interp(self._wind_dir, h) % 360
 
     def drift(self, t: datetime) -> tuple[float, float]:
         cn, ce = self.current(t)
@@ -82,7 +105,9 @@ class Environment:
         return cn + lw * math.cos(to), ce + lw * math.sin(to)
 
     def cloud(self, t: datetime) -> float:
-        return min(1.0, max(0.05, _interp(self._cloud, self._hours(t))))
+        base = min(1.0, max(0.05, _interp(self._cloud, self._hours(t))))
+        k = self.storm(t)
+        return base * (1 - k) + self.cfg.storm_cloud * k
 
 
 def _ou(rnd, n, mean, sd, tau_h):

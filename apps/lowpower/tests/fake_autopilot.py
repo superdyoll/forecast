@@ -219,10 +219,12 @@ class FakeRover:
 
 
 if __name__ == "__main__":
-    # Standalone, for the package smoke test: python3 fake_autopilot.py [PORT]
+    # Standalone, for the package smoke test: fake_autopilot.py [PORT [VOLTS]]
     import sys
 
-    rover = FakeRover(port=int(sys.argv[1]) if len(sys.argv) > 1 else 5760).start()
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5760
+    volts = float(sys.argv[2]) if len(sys.argv) > 2 else 23.0
+    rover = FakeRover(port=port, volt=volts).start()
     rover.armed = True
     print(f"fake rover on tcp:127.0.0.1:{rover.port}", flush=True)
     last = None

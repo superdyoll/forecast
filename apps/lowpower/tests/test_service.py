@@ -34,7 +34,11 @@ class ServiceRecovers(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.state = Path(self.tmp.name)
-        self.rover = FakeRover(position_delay_s=self.POSITION_DELAY_S).start()
+        # The service plans on the real clock (e.g. November at 60 N: little sun
+        # for its 48 h look-ahead), so start it well charged (24.5 V = 90 %).
+        self.rover = FakeRover(
+            position_delay_s=self.POSITION_DELAY_S, volt=24.5
+        ).start()
         self.rover.armed = True
         save(
             Mission(kind="transit", waypoints=[[60.30, 2.20], [60.50, 2.20]]),
@@ -110,7 +114,7 @@ class QuickRebootSeenBeforeItsBootClock(unittest.TestCase):
     def test_rearms_when_position_lags_the_heartbeat(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp)
-            rover = FakeRover(position_delay_s=2.0).start()
+            rover = FakeRover(position_delay_s=2.0, volt=24.5).start()
             rover.armed = True
             save(
                 Mission(kind="transit", waypoints=[[60.30, 2.20]]),

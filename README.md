@@ -7,7 +7,7 @@ boat. Standard library only (Python 3.9+), so it runs on the boat's computer.
 
 ```sh
 git clone https://github.com/superdyoll/forecast.git && cd forecast
-scripts/quickstart.sh          # installs into .venv, runs the simulation at 20x,
+scripts/quickstart.sh          # installs into .venv, runs the simulation (20x; 5x on arm64),
                                # prints "READY http://127.0.0.1:8080"
 ```
 
@@ -144,9 +144,14 @@ directly with `SIM_RATE=20 apps/sim/run_sitl.sh` after installing.
 * **SITL:** ArduPilot 4.0 Rover (`radarku/ardupilot-sitl`, `sailboat-motor`
   hull) with `apps/sim/sitl/scout.parm`.
 * **scout-sim:** current (mean plus tidal ellipse), gusty wind with hull
-  leeway, and cloud, pushed into SITL as drift. It also runs a power model
+  leeway, and cloud, pushed into SITL as drift, and optionally a storm
+  (`--storm 24:72`: days of overcast and gales). It also runs a power model
   that sends battery, load and solar to the service. Its "true" parameters are
   about 10 % off the fitted ones on purpose.
+* **scout-sim fast:** the same environment, power and the real planner without
+  SITL, for scenarios that last days: `scout-sim fast --days 5 --mission
+  station --storm 24:72 --out sim-run/storm` writes a `summary.json` scoring
+  every forecast.
 * **scout-web:** the current decision and why, battery against earlier
   forecasts, forecast error by lead time, load and solar. It updates itself
   every few seconds (304 when nothing changed), keeps your choices and pauses

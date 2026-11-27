@@ -8,7 +8,8 @@
 #   SIM_MISSION=station apps/sim/run_sitl.sh # station-keeping instead of a transit
 #
 # Settings (environment or .env): SIM_START, SIM_RATE, SIM_WORK (output dir),
-# SIM_MISSION (transit|station|keep), SIM_PCT0, DOCKER, PYTHON, SCOUT_PARAMS.
+# SIM_MISSION (transit|station|keep), SIM_PCT0, SIM_FRESH (1: new SITL), DOCKER,
+# PYTHON, SCOUT_PARAMS.
 # Needs: pip install -r requirements-dev.txt (all apps, editable), and docker.
 set -euo pipefail
 
@@ -30,7 +31,12 @@ echo "clock: $SCOUT_CLOCK   output: $SIM_WORK"
 
 # --- ArduPilot SITL: Rover, motor-sailboat model (the 4.0 boat model with water current)
 # Its speedup is fixed when the container is created, so a container made for
-# another SIM_RATE is recreated (it is labelled with its rate).
+# another SIM_RATE is recreated (it is labelled with its rate). SIM_FRESH=1
+# always starts a new one (position and mission from an earlier run would
+# contradict the new clock); otherwise it is kept, like a real autopilot.
+if [ "${SIM_FRESH:-0}" = 1 ] && "$DOCKER" container inspect "$CONTAINER" >/dev/null 2>&1; then
+  "$DOCKER" rm -f "$CONTAINER" >/dev/null
+fi
 rate_of() { "$DOCKER" container inspect -f '{{ index .Config.Labels "scout.rate" }}' "$CONTAINER" 2>/dev/null; }
 if "$DOCKER" container inspect "$CONTAINER" >/dev/null 2>&1 \
    && [ "$(rate_of)" = "$SIM_RATE" ] \

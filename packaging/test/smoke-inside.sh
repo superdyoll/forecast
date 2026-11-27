@@ -74,7 +74,9 @@ unchanged_is_304() { # the data may change between the two requests: retried
 wait_for 5 unchanged_is_304 || fail "/api/live doesn't answer 304 when unchanged"
 
 step "the service drives an autopilot (fake rover on tcp:5760)"
-systemd-run --quiet --unit fake-rover python3 /src/apps/lowpower/tests/fake_autopilot.py 5760
+# 24.5 V = 90 %: the service plans on the real clock (a winter night has no sun
+# for its 48 h look-ahead), and this step is about driving the autopilot.
+systemd-run --quiet --unit fake-rover python3 /src/apps/lowpower/tests/fake_autopilot.py 5760 24.5
 runuser -u scout -- scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --reserve 30 \
   --arrive-in 48 >/dev/null || fail "set-mission"
 grep -q '"arrive_by": "20' /var/lib/scout-lowpower/mission.json || fail "--arrive-in"

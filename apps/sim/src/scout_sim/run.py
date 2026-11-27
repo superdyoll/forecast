@@ -37,6 +37,7 @@ from scout_forecast.env import load_dotenv
 from scout_lowpower import mavlink as M
 from scout_lowpower.mission import parse_time
 
+from . import fast
 from .environment import EnvConfig, Environment
 from .power import PowerModel, PowerTruth
 
@@ -53,7 +54,16 @@ class Sim:
             a.power_out, sysid=1, compid=M.MAV_COMP_ID_ONBOARD_COMPUTER + 2
         )
         start = clock.now()
-        self.env = Environment(EnvConfig(seed=a.seed), start)
+        cfg = EnvConfig(seed=a.seed)
+        if a.storm:
+            h0, hours = (float(x) for x in a.storm.split(":")[:2])
+            cfg = EnvConfig(
+                seed=a.seed,
+                storm_start_h=h0,
+                storm_hours=hours,
+                storm_cloud=a.storm_cloud,
+            )
+        self.env = Environment(cfg, start)
         self.power = PowerModel(PowerTruth(), model, pct0=a.pct0, seed=a.seed)
         self.truth_path = Path(a.truth)
         self.lat = self.lon = None
@@ -157,10 +167,34 @@ class Sim:
                 log.warning("SITL restarted: re-requesting telemetry")
                 self.request_streams()
             self.boot_ms = m["time_boot_ms"]
+            self.check_pace(m["time_boot_ms"], now)
             self.lat, self.lon = m["lat"] / 1e7, m["lon"] / 1e7
             self.vel = (m["vx"] / 100, m["vy"] / 100)
         elif n == "STATUSTEXT" and self.a.verbose:
             log.info("SITL: %s", m["text"])
+
+    def check_pace(self, boot_ms: int, now: float):
+        """Warn when SITL's physics can't keep up with the shared clock (seen
+        with x86 emulation on Apple silicon: x5.5 at SIM_RATE=20). The boat
+        then covers ground too slowly in clock time: arrivals look late."""
+        ref = getattr(self, "_pace_ref", None)
+        if ref is None or boot_ms < ref[0]:
+            self._pace_ref = (boot_ms, now)
+            return
+        real = now - ref[1]
+        if real < 60:
+            return
+        achieved = (boot_ms - ref[0]) / 1000 / real
+        want = clock.rate()
+        if achieved < 0.8 * want:
+            log.warning(
+                "SITL runs at x%.1f but the clock assumes x%g: the boat lags the "
+                "clock (arrivals look late); use a lower SIM_RATE (e.g. %d)",
+                achieved,
+                want,
+                max(1, int(achieved)),
+            )
+        self._pace_ref = (boot_ms, now)
 
     def push_drift(self):
         dn, de = self.env.drift(clock.now())
@@ -292,13 +326,26 @@ def main(argv=None) -> int:
         default=60.0,
         help="simulated seconds per truth line",
     )
+    r.add_argument(
+        "--storm",
+        metavar="START_H:HOURS",
+        help="cloud and gale from START_H, for HOURS",
+    )
+    r.add_argument("--storm-cloud", type=float, default=0.08)
     r.add_argument("-v", "--verbose", action="store_true")
+    f = sub.add_parser(
+        "fast", help="fast-time simulation without SITL (days in seconds)"
+    )
+    fast.add_args(f)
     a = ap.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
     if a.cmd == "clock":
         print(clock.make(parse_time(a.start), a.rate))
+        return 0
+    if a.cmd == "fast":
+        print(json.dumps(fast.run(a), indent=1))
         return 0
     model = load_params(a.params)
     try:

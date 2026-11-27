@@ -55,3 +55,19 @@ def along_leg(v_cmd: float, unit, current, stw_max: float):
             return min(along, 0.0), stw_max  # can't even hold the track
         sog, stw = along + math.sqrt(stw_max**2 - cross**2), stw_max
     return sog, stw
+
+
+def learn_top_speed(cap, commanded: float, sog: float, stw: float):
+    """The hull's real top speed through the water, learnt while motoring.
+
+    Making clearly less over ground than commanded means the boat is at its
+    limit: the speed through the water it holds then (from the measured
+    power) is its top speed. Making the commanded speed at a higher water
+    speed than `cap` shows the cap is too low. Otherwise nothing is learnt.
+    `cap` is None until the first observation.
+    """
+    if sog < commanded - 0.1:
+        return stw if cap is None else cap + 0.3 * (stw - cap)
+    if cap is not None and stw > cap:
+        return stw
+    return cap

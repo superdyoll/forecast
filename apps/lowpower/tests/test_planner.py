@@ -125,7 +125,8 @@ class Current(unittest.TestCase):
         # Top speed through the water ~0.85 m/s: against 0.5 m/s the boat makes
         # ~0.35 m/s over ground whatever it asks for above that.
         m = transit()  # no deadline: it would pick the fastest otherwise
-        p = decide(state(95, current_ms=(-0.5, 0.0)), m, PARAMS)
+        steady = (-0.5, 0.0)
+        p = decide(state(95, current_ms=steady, current_mean_ms=steady), m, PARAMS)
         self.assertEqual(p.action, "transit")
         self.assertLessEqual(p.speed_ms, 0.4)
         # The plan never claims more over ground than the hull can make.
@@ -133,8 +134,33 @@ class Current(unittest.TestCase):
         reach = E.max_stw_ms(PARAMS) - 0.5
         self.assertGreaterEqual(hours, 33_000 / reach / 3600)
 
-    def test_current_faster_than_the_boat_pauses(self):
-        p = decide(state(70, current_ms=(-1.0, 0.0)), transit(), PARAMS)
+    def test_a_peak_current_is_not_assumed_to_last(self):
+        # Station-keeping against today's peak tidal flow vs. its daily mean.
+        m = Mission(kind="station", station=[60.2, 2.2], min_reserve_pct=30)
+        peak = (0.6, 0.0)
+        lasting = decide(state(60, current_ms=peak, current_mean_ms=peak), m, PARAMS)
+        tidal = decide(state(60, current_ms=peak), m, PARAMS)  # mean ~0
+        self.assertGreater(tidal.min_pct, lasting.min_pct)
+
+    def test_learnt_top_speed_slows_the_eta(self):
+        m = transit()
+        fast = decide(state(95), m, PARAMS)
+        slow_hull = decide(state(95, stw_max_ms=0.3), m, PARAMS)
+        self.assertGreater(slow_hull.eta, fast.eta)
+        self.assertLessEqual(slow_hull.speed_ms, 0.3)
+
+    def test_strong_tidal_current_keeps_going_because_it_eases(self):
+        # Against 1 m/s now (faster than the boat), but a tide with mean ~0:
+        # the planner crawls on and expects to arrive once it slackens.
+        p = decide(state(90, current_ms=(-1.0, 0.0)), transit(), PARAMS)
+        self.assertEqual(p.action, "transit")
+        self.assertIsNotNone(p.eta)
+
+    def test_current_faster_than_the_boat_pauses_when_not_affordable(self):
+        night = T0.replace(hour=21)
+        steady = (-1.0, 0.0)
+        s = state(36, t=night, cloud=0.1, current_ms=steady, current_mean_ms=steady)
+        p = decide(s, transit(), PARAMS)
         self.assertEqual(p.action, "pause")
         self.assertTrue(any("no headway" in r for r in p.reasons))
 
@@ -154,7 +180,7 @@ class StationDecisions(unittest.TestCase):
         p = decide(state(60), self.station(), PARAMS)
         self.assertEqual(p.action, "hold")
 
-    def test_drifts_and_returns_when_far(self):
+    def test_drifts_with_motors_off_when_holding_is_unaffordable(self):
         # Stemming a 0.8 m/s current takes ~50 W: too much at night with 34 %.
         tight = state(34, t=T0.replace(hour=21), cloud=0.1, current_ms=(0.8, 0.0))
         p = decide(tight, self.station(), PARAMS)
@@ -168,7 +194,56 @@ class StationDecisions(unittest.TestCase):
             cloud=0.1,
             current_ms=(0.8, 0.0),
         )  # ~1.1 km away
-        self.assertTrue(decide(far, self.station(), PARAMS).returning)
+        far_plan = decide(far, self.station(), PARAMS)
+        self.assertEqual(far_plan.action, "drift")
+        self.assertFalse(far_plan.returning)  # holding again brings it back
+
+    def test_below_the_floor_never_motors_back(self):
+        far = BoatState(
+            time=T0.replace(hour=21), lat=60.21, lon=2.20, battery_pct=20, volt=21
+        )  # ~1.1 km away, below reserve 30 - floor 3
+        p = decide(far, self.station(), PARAMS)
+        self.assertEqual(p.action, "drift")
+        self.assertFalse(p.returning)
+
+    def test_nothing_affordable_means_motors_off(self):
+        far = BoatState(
+            time=T0.replace(hour=21),
+            lat=60.21,
+            lon=2.20,
+            battery_pct=36,
+            volt=21.8,
+            cloud=0.05,
+            current_ms=(0.0, 0.6),  # slower than the boat, but costly to stem
+        )
+        p = decide(far, self.station(), PARAMS)
+        self.assertEqual(p.action, "drift")
+        self.assertFalse(p.feasible)
+        self.assertFalse(p.returning)
+
+    def test_no_futile_return_against_a_gale(self):
+        far = BoatState(
+            time=T0.replace(hour=21),
+            lat=60.21,
+            lon=2.20,
+            battery_pct=50,
+            volt=22.5,
+            cloud=0.1,
+            current_ms=(0.0, 0.9),  # drift faster than the boat's ~0.85 m/s
+        )
+        p = decide(far, self.station(), PARAMS)
+        self.assertEqual(p.action, "drift")
+        self.assertFalse(p.returning)
+
+    def test_bad_weather_is_assumed_to_persist(self):
+        m = self.station()
+        gloomy = decide(state(60, cloud=0.1), m, PARAMS)
+        fair = decide(state(60, cloud=0.63), m, PARAMS)
+        shortsighted = decide(
+            state(60, cloud=0.1), m, PARAMS, cfg=Config(bad_weather_tau_h=0)
+        )
+        self.assertLess(gloomy.end_pct, shortsighted.end_pct)
+        self.assertLess(gloomy.end_pct, fair.end_pct)
 
     def test_arrival_switches_to_station_keeping(self):
         at_end = BoatState(

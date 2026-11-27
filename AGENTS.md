@@ -38,12 +38,12 @@ inputs and may not exist in a fresh clone.
 
 | Path | Status |
 | --- | --- |
-| `scripts/quickstart.sh` | **Fresh clone to running simulation**: `.venv` + editable install, docker/port checks, SITL image pull, `apps/sim/run_sitl.sh` at 20x, prints `READY <url>`. `--install-only`, `--test`. Used by the `install-and-run` skill (`.claude/skills/`); `CLAUDE.md` imports this file. |
+| `scripts/quickstart.sh` | **Fresh clone to running simulation**: `.venv` + editable install, docker/port checks, SITL image pull, a fresh SITL each run, `apps/sim/run_sitl.sh` at 20x (5x on arm64), prints `READY <url>`. `--install-only`, `--test`. Used by the `install-and-run` skill (`.claude/skills/`); `CLAUDE.md` imports this file. |
 | `apps/` | One Python app per folder, each its own wheel with `pyproject.toml`, `src/<package>/` and `tests/`. Dependencies only point down: `forecast` <- `lowpower` <- `sim`, and `forecast` <- `web`. `web` and `lowpower` share only the state files, never imports. |
-| `apps/forecast/` | **`scout-forecast`** (`scout_forecast`, stdlib only, no dependencies): `data.py` (load/clean/resample the Tether CSV), `energy.py` (physical model: grid, fit, simulate, project), `evaluate.py` (blocked, purged k-fold), `forecast.py`. Also what the other apps share: `env.py` (`.env` and `--csv`), `clock.py` (simulated clock, `SCOUT_CLOCK`). Commands: `forecast`, `scout-evaluate`, `scout-data`. Best model so far (3.1 points over 12 h with a known plan). Its tests check it never imports the apps above it. |
-| `apps/lowpower/` | **`scout-lowpower`** (`scout_lowpower`, the boat service, stdlib + scout-forecast): `planner.py` (pure decision logic), `mission.py` (operator mission file), `mavlink.py` (MAVLink v2 codec + self-reconnecting tcp/udp/serial links), `service.py` (the run loop: telemetry, decisions, commands, recovery), `cli.py` (`scout-lowpower run / set-mission / status / plan`). Survives link loss, autopilot restarts (resync, mission check, re-arm), operator overrides and its own restarts. Tests: planner decisions, codec (byte-for-byte vs pymavlink if installed), recovery against `tests/fake_autopilot.py` (~35 s). |
+| `apps/forecast/` | **`scout-forecast`** (`scout_forecast`, stdlib only, no dependencies): `data.py` (load/clean/resample the Tether CSV), `energy.py` (physical model: grid, fit, simulate, project), `evaluate.py` (blocked, purged k-fold), `forecast.py`. Also what the other apps share: `env.py` (`.env` and `--csv`), `clock.py` (simulated clock, `SCOUT_CLOCK`), and `fitted_params.json` (the 17-day fit, `energy.fitted_params()`: the default model everywhere). Commands: `forecast`, `scout-evaluate`, `scout-data`. Best model so far (3.1 points over 12 h with a known plan). Its tests check it never imports the apps above it. |
+| `apps/lowpower/` | **`scout-lowpower`** (`scout_lowpower`, the boat service, stdlib + scout-forecast): `planner.py` (pure decision logic), `current.py` (water current and top speed through the water from measured power, pure), `mission.py` (operator mission file), `mavlink.py` (MAVLink v2 codec + self-reconnecting tcp/udp/serial links), `service.py` (the run loop: telemetry, decisions, commands, recovery), `cli.py` (`scout-lowpower run / set-mission / status / plan`). Survives link loss, autopilot restarts (resync, mission check, re-arm), operator overrides and its own restarts. Tests: planner decisions, codec (byte-for-byte vs pymavlink if installed), recovery against `tests/fake_autopilot.py` (~35 s). |
 | `apps/web/` | **`scout-web`** (`scout_web`, stdlib + scout-forecast): `server.py` + `static/index.html`, forecast vs actual page (no external assets, localhost by default). Reads the service's `decision.json` / `history.jsonl`; `/api/hindcast` forecasts past periods from the CSV. |
-| `apps/sim/` | **`scout-sim`** (never on the boat): environment (current, wind, cloud) pushed into ArduPilot 4.0 SITL as `SIM_TIDE` drift, and a power model publishing `BATTERY_STATUS` to the service's `--power-link`. `apps/sim/run_sitl.sh` runs SITL (docker `radarku/ardupilot-sitl`) + sim + service + web. |
+| `apps/sim/` | **`scout-sim`** (never on the boat): environment (current, wind, cloud) pushed into ArduPilot 4.0 SITL as `SIM_TIDE` drift, and a power model publishing `BATTERY_STATUS` to the service's `--power-link`; `--storm START_H:HOURS`. `apps/sim/run_sitl.sh` runs SITL (docker `radarku/ardupilot-sitl`) + sim + service + web. `fast.py` (`scout-sim fast`): the same environment, power truth and real planner without SITL, days in seconds, scores every forecast; `--no-current-estimate` for A/B. |
 | `model/lstm/train_lstm.py` | Experiment, not an app. Keras LSTM forecasting the change in SoC, checked with blocked, purged k-fold. No app may import or mention it. Needs scout-forecast plus `model/lstm/requirements.txt`; training only, not for the boat. Run with `python3 -m model.lstm.train_lstm`; output goes to `runs/lstm/`. |
 | `packaging/` | **Debs, installed with apt.** `build.sh` builds the wheels and, from them, `deb/build_debs.py` builds `scout-forecast`, `scout-lowpower`, `scout-web`, `scout-sim` and the `scout` metapackage (code in `/usr/lib/python3/dist-packages`, units in `/usr/lib/systemd/system`, `/etc/scout/scout.env` conffile, generated maintainer scripts) plus a flat apt repository. `systemd/` has the units (`scout-lowpower` notify+watchdog, `scout-web`, simulation-only `scout-sitl` and `scout-sim`). `version.py` keeps every app at one version. `test/smoke.sh` installs the debs under systemd in a container and checks them (~1 min). |
 | `.github/workflows/release.yml` | Runs only on pushes to `main`: bump patch version of every app, unit tests, build, smoke test (with upgrade from the previous release), then push `Release vX.Y.Z [skip ci]` + tag and publish a GitHub release. |
@@ -75,7 +75,8 @@ Update this table when you add components.
 ## Commands
 
 ```sh
-scripts/quickstart.sh                # fresh clone -> .venv -> simulation at 20x, prints READY <url>
+scripts/quickstart.sh                # fresh clone -> .venv -> simulation, prints READY <url>
+.venv/bin/scout-sim fast --days 5 --mission station --storm 24:72   # days in seconds, no SITL
 scripts/quickstart.sh --test         # every app's unit tests
 packaging/build.sh                   # wheels + debs + apt index in ./dist
 packaging/test/smoke.sh              # the debs under systemd in docker, ~1 min
@@ -160,10 +161,16 @@ work around them a second time downstream.
 - Right after arming, SITL briefly reports "EKF variance / EKF failsafe" and may
   reject one mode change; it clears within seconds and the service retries.
 - Message intervals are per MAVLink link: each client requests its own streams.
+- **Emulated SITL (arm64) runs at ~5.5x at most.** A faster `SCOUT_CLOCK` makes the
+  boat lag the clock (arrivals look late, speeds look low); `scout-sim` warns.
+  Measure with `time_boot_ms` on port 5763 while reading continuously (a client that
+  stops reading stalls SITL's output on that port).
+- A SITL container kept from an earlier run still has the boat where that run left
+  it; `quickstart.sh` starts a fresh one (`SIM_FRESH=1`).
 - **ArduPilot's speed target is over ground**; the energy model and the planner
   think in speed through the water. With current the two differ a lot (see
-  REPORT.md, Open issues). The `sailboat-motor` hull tops out near 0.8 m/s
-  through the water.
+  REPORT.md). The service estimates the current and the real top speed through
+  the water from measured propulsion power (`current.py`).
 - A reboot shorter than the 5 s heartbeat timeout shows only in the boot clock
   (`time_boot_ms`); keep tests giving the fake autopilot a few seconds of uptime
   before rebooting it.

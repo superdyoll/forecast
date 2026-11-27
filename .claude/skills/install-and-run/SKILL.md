@@ -7,7 +7,7 @@ description: Install this repository's apps and run the Scout simulation (ArduPi
 
 Everything goes through one script, `scripts/quickstart.sh`. Don't reinvent its
 steps by hand. It creates `.venv`, installs every app editable, checks docker
-and ports, pulls the SITL image on first run, starts the simulation at 20x and
+and ports, pulls the SITL image on first run, starts the simulation (20x, or 5x on Apple silicon where SITL is emulated) and
 prints `READY <url>` once the page is up and the service is planning.
 
 ## Run it
@@ -19,9 +19,10 @@ prints `READY <url>` once the page is up and the service is planning.
    short until-loop (`until grep -qE '^READY|ERROR' <output file>; do sleep 2; done`)
    run in the background. The first run pulls a large docker image: allow
    several minutes; later runs are ready in about a minute.
-3. Give the user the URL. Say the clock runs 20x (about 4 simulated hours in
-   12 minutes), the page updates itself every few seconds, and the
-   forecast-against-actual chart fills in over the first ~10 minutes.
+3. Give the user the URL. Say the simulated clock runs at the rate the script
+   printed (20x: ~4 simulated hours in 12 minutes; 5x on Apple silicon), the
+   page updates itself every few seconds, and the forecast-against-actual
+   chart fills in as forecasts come due.
 4. To stop: stop that background task. The `scout-sitl` container keeps
    running; `docker rm -f scout-sitl` removes it (only if the user asks).
 
@@ -29,7 +30,9 @@ Other requests:
 
 - "Install" only: `scripts/quickstart.sh --install-only` (foreground, ~1 min).
 - "Run the tests": `scripts/quickstart.sh --test` (foreground, ~1 min).
-- Real time instead of 20x: `SIM_RATE=1 scripts/quickstart.sh`.
+- Another rate: `SIM_RATE=1 scripts/quickstart.sh` (real time). Faster than
+  SITL can run makes the boat lag the clock: `scout-sim` logs a warning.
+- Days-long scenarios (storms) without SITL: `.venv/bin/scout-sim fast --help`.
 - Install as Linux system services instead (debs, apt, systemd): follow
   README.md, "Install on the boat" and "Simulation > From the debs". That needs
   sudo on a Debian/Ubuntu machine; ask before running sudo commands.

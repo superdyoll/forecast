@@ -24,8 +24,10 @@ Transit (waypoints):
 
 Station (or arrived at the last waypoint):
   hold (LOITER, thrust enough to stem the current) if feasible, else drift
-  (HOLD, motors off) and motor back when outside drift_radius_m, again
-  preferring normal comms.
+  (HOLD, motors off) until holding is affordable again; holding then brings
+  the boat back. Drifting and motoring back costs at least as much as holding
+  (propulsion grows with the cube of speed: (d/v) P(v) >= P(d)), so when
+  holding isn't affordable, returning isn't either. Normal comms preferred.
 
 Safety rules that bypass everything else:
   * battery_pct below reserve - floor_pct now: stop propulsion immediately.
@@ -35,7 +37,7 @@ Safety rules that bypass everything else:
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
 
 import math
@@ -49,7 +51,10 @@ from .mission import Mission, distance_m, legs, remaining_m
 @dataclass
 class Config:
     speeds_ms: tuple = (0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2)
-    horizon_h: float = 24.0  # look-ahead when there's no deadline
+    # Look-ahead when there's no deadline. 48 h, not 24: in a 3-day storm
+    # (scout-sim fast --storm), 24 h let it hold station into the gale on day 1
+    # and run below the reserve on day 3.
+    horizon_h: float = 48.0
     max_horizon_h: float = 96.0
     margin_pct: float = 5.0  # forecast must stay this far above the reserve
     comfort_pct: float = 15.0  # spare needed to choose speed over economy
@@ -59,9 +64,16 @@ class Config:
     starlink_duty_min: float = 0.05
     min_dwell_s: float = 900.0
     station_hold_w: float = 5.0  # minimum station-keeping propulsion, W
-    drift_return_fraction: float = 0.15  # share of drift time spent returning
-    return_speed_ms: float = 0.6
     min_progress_ms: float = 0.05  # less over ground than this is no headway
+    stem_hours: float = (
+        6.0  # no headway: price motoring into it this long (a tide turns)
+    )
+    # Bad weather persists: with the recent cloud factor below the long-run
+    # average, plan as if it relaxes back over this long, not cloud_tau_h.
+    bad_weather_tau_h: float = 96.0
+    # In forecasts the current relaxes from now to its mean over this long
+    # (a semi-diurnal tide turns in ~6 h), instead of staying at today's peak.
+    current_tau_h: float = 3.0
 
 
 @dataclass
@@ -77,6 +89,12 @@ class BoatState:
     # Estimated water current (north, east) m/s, where the water goes
     # (current.py). ArduPilot's speeds are over ground; power is through water.
     current_ms: tuple = (0.0, 0.0)
+    # Its slow average (~a day): what the current relaxes to in forecasts,
+    # since a tidal current peaks and slackens every few hours.
+    current_mean_ms: tuple = (0.0, 0.0)
+    # Top speed through the water seen in practice (current.learn_top_speed);
+    # None until learnt. The planner uses the lower of this and the model's.
+    stw_max_ms: float | None = None
     at_final: bool = (
         False  # the autopilot is on the loiter item after the last waypoint
     )
@@ -87,7 +105,7 @@ class Plan:
     action: str  # "transit", "pause", "hold" or "drift"
     speed_ms: float | None
     starlink_duty: float
-    returning: bool  # drift: motoring back to the station
+    returning: bool  # always False now (drift is motors off); kept for state files
     feasible: bool
     min_pct: float
     end_pct: float
@@ -185,7 +203,7 @@ def decide(
 def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
     route = legs(m, (s.lat, s.lon), s.next_wp)
     deadline_h = (m.arrive_by - s.time).total_seconds() / 3600 if m.arrive_by else None
-    stw_max = E.max_stw_ms(p)
+    stw_max = _stw_max(s, p)
     cur = math.hypot(*s.current_ms)
     if cur >= 0.05 and route:
         u = route[0][1]
@@ -199,15 +217,27 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
         opts = _distinct(
             [_transit_option(s, m, p, cfg, v, duty, route) for v in cfg.speeds_ms]
         )
-        opts = [o for o in opts if math.isfinite(o.hours_to_go)]
-        if not opts:
-            opt = _pause_option(s, m, p, cfg, cfg.starlink_duty_min)
-            reasons.append(
-                f"no headway: the current ({cur:.2f} m/s) beats the boat's top speed "
-                f"through the water ({stw_max:.2f} m/s); pausing until it eases "
-                f"(low point {opt.min_pct:.0f}%)"
-            )
-            return _plan(opt, s, m, line, reasons, prev, cfg)
+        moving = [o for o in opts if math.isfinite(o.hours_to_go)]
+        if not moving:
+            # No speed makes headway. Motoring flat out loses the least ground
+            # until the current turns; pause only if that isn't affordable.
+            stem = max(opts, key=lambda o: o.speed)
+            if stem.min_pct >= line:
+                reasons.append(
+                    f"no headway: the current ({cur:.2f} m/s) beats the boat's top "
+                    f"speed through the water ({stw_max:.2f} m/s); motoring into it "
+                    f"to hold ground until it eases (low point {stem.min_pct:.0f}%)"
+                )
+                return _plan(stem, s, m, line, reasons, prev, cfg)
+            if duty == cfg.starlink_duty_min:
+                opt = _pause_option(s, m, p, cfg, cfg.starlink_duty_min)
+                reasons.append(
+                    f"no headway against {cur:.2f} m/s and no energy to hold ground: "
+                    f"pausing (low point {opt.min_pct:.0f}%)"
+                )
+                return _plan(opt, s, m, line, reasons, prev, cfg)
+            continue
+        opts = moving
         feasible = [o for o in opts if o.min_pct >= line]
         on_time = [
             o for o in feasible if deadline_h is None or o.hours_to_go <= deadline_h
@@ -291,30 +321,42 @@ def _hysteresis(best, opts, prev, s, cfg, line, deadline_h, reasons):
 
 def _transit_option(s, m, p, cfg, v, duty, route) -> _Option:
     """Command `v` over ground along `route` (legs): time and load per leg."""
-    stw_max = E.max_stw_ms(p)
+    stw_max = _stw_max(s, p)
     base = E.load_component(p, "hotel_w") + E.load_component(p, "starlink_w") * duty
     segments, hours = [], 0.0  # (end hour, load W)
     for length, unit in route:
-        sog, stw = C.along_leg(v, unit, s.current_ms, stw_max)
+        cur = _current_at(s, hours + 0.5 * length / max(v, 0.1) / 3600, cfg)
+        sog, stw = C.along_leg(v, unit, cur, stw_max)
         if sog < cfg.min_progress_ms:
             hours = math.inf
             break
         hours += length / sog / 3600
         segments.append((hours, base + E.propulsion_w(p, stw)))
-    holding = base + _station_w(p, cfg, s.current_ms)
-    span = hours if math.isfinite(hours) else cfg.max_horizon_h
+    if not math.isfinite(hours):  # no headway: flat out for stem_hours, then hold
+        segments = [(cfg.stem_hours, base + E.propulsion_w(p, stw_max))]
+    span = hours if math.isfinite(hours) else cfg.stem_hours
     horizon = min(max(cfg.horizon_h, span + 2), cfg.max_horizon_h)
-    moving_max = base + E.propulsion_w(p, stw_max)
 
     def load(k, t):
         h = (k + 0.5) * E.STEP_H
         for end, w in segments:
             if h < end:
                 return w
-        return holding if math.isfinite(hours) else moving_max
+        return base + _station_w(p, cfg, _current_at(s, h, cfg))
 
-    sim = _project(s, p, load, horizon)
+    sim = _project(s, p, load, horizon, cfg)
     return _Option("transit", v, duty, hours, min(sim["pct"]), sim["pct"][-1], sim)
+
+
+def _current_at(s, hours: float, cfg: Config):
+    """The current `hours` ahead: relaxing from now to its slow mean."""
+    k = math.exp(-hours / cfg.current_tau_h) if cfg.current_tau_h > 0 else 1.0
+    return tuple(m + (c - m) * k for c, m in zip(s.current_ms, s.current_mean_ms))
+
+
+def _stw_max(s, p) -> float:
+    model = E.max_stw_ms(p)
+    return model if s.stw_max_ms is None else max(0.05, min(model, s.stw_max_ms))
 
 
 def _distinct(opts):
@@ -334,7 +376,7 @@ def _distinct(opts):
 
 def _pause_option(s, m, p, cfg, duty) -> _Option:
     base = E.load_component(p, "hotel_w") + E.load_component(p, "starlink_w") * duty
-    sim = _project(s, p, lambda k, t: base, cfg.horizon_h)
+    sim = _project(s, p, lambda k, t: base, cfg.horizon_h, cfg)
     return _Option("pause", None, duty, None, min(sim["pct"]), sim["pct"][-1], sim)
 
 
@@ -351,8 +393,8 @@ def _decide_station(s, m, p, cfg, prev, line, reasons) -> Plan:
                     )
                 else:
                     reasons.append(
-                        f"active hold would go below {line:.0f}%: drifting with motors "
-                        f"off, returning beyond {m.drift_radius_m:.0f} m "
+                        f"holding station would go below {line:.0f}%: drifting with "
+                        f"motors off until holding is affordable again "
                         f"(low point {opt.min_pct:.0f}%)"
                     )
                 if duty == cfg.starlink_duty_min:
@@ -362,8 +404,8 @@ def _decide_station(s, m, p, cfg, prev, line, reasons) -> Plan:
                 return _plan(opt, s, m, line, reasons, prev, cfg)
     opt = _station_option(s, m, p, cfg, "drift", cfg.starlink_duty_min)
     reasons.append(
-        f"no option keeps the forecast above {line:.0f}%: drifting with minimal "
-        f"comms to save energy (low point {opt.min_pct:.0f}%)"
+        f"no option keeps the forecast above {line:.0f}%: drifting with motors off "
+        f"and minimal comms to save energy (low point {opt.min_pct:.0f}%)"
     )
     return _plan(opt, s, m, line, reasons, prev, cfg)
 
@@ -377,23 +419,26 @@ def _station_w(p, cfg, current=(0.0, 0.0)) -> float:
 
 def _station_option(s, m, p, cfg, action, duty) -> _Option:
     base = E.load_component(p, "hotel_w") + E.load_component(p, "starlink_w") * duty
-    if action == "hold":
-        w = base + _station_w(p, cfg, s.current_ms)
-    else:
-        # Motoring back against the drift that carried it away.
-        back = min(cfg.return_speed_ms + math.hypot(*s.current_ms), E.max_stw_ms(p))
-        w = base + cfg.drift_return_fraction * E.propulsion_w(p, back)
+
+    def load(k, t):
+        if action == "drift":  # motors off
+            return base
+        return base + _station_w(p, cfg, _current_at(s, (k + 0.5) * E.STEP_H, cfg))
+
     horizon = cfg.horizon_h
     if m.hold_until is not None:
         horizon = min(
             max((m.hold_until - s.time).total_seconds() / 3600, 1.0), cfg.max_horizon_h
         )
-    sim = _project(s, p, lambda k, t: w, horizon)
+    sim = _project(s, p, load, horizon, cfg)
     return _Option(action, None, duty, None, min(sim["pct"]), sim["pct"][-1], sim)
 
 
 # ------------------------------------------------------------------ helpers
-def _project(s, p, load_fn, hours) -> dict:
+def _project(s, p, load_fn, hours, cfg: Config | None = None) -> dict:
+    cfg = cfg or Config()
+    if s.cloud is not None and s.cloud < p.cloud_default:
+        p = replace(p, cloud_tau_h=max(p.cloud_tau_h, cfg.bad_weather_tau_h))
     return E.project(
         p,
         s.time,
@@ -409,16 +454,8 @@ def _project(s, p, load_fn, hours) -> dict:
 
 
 def _plan(opt: _Option, s, m, line, reasons, prev, cfg) -> Plan:
+    # Drifting is motors off; holding (LOITER at the station) brings it back.
     returning = False
-    if opt.action == "drift":
-        target = m.station if m.kind == "station" else m.waypoints[-1]
-        d = distance_m((s.lat, s.lon), target)
-        was = bool(prev and prev.action == "drift" and prev.returning)
-        # Return when beyond the drift radius; keep motoring until back inside
-        # the loiter radius (hysteresis between the two radii).
-        returning = d > m.drift_radius_m or (was and d > m.radius_m)
-        if returning:
-            reasons.append(f"{d:.0f} m from station: motoring back")
     eta = (
         s.time + timedelta(hours=opt.hours_to_go)
         if opt.hours_to_go is not None and math.isfinite(opt.hours_to_go)

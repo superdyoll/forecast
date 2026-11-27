@@ -32,7 +32,7 @@ class Mission:
     waypoints: list = field(default_factory=list)  # [[lat, lon], ...]
     station: list | None = None  # [lat, lon]
     radius_m: float = 50.0  # loiter radius when holding station
-    drift_radius_m: float = 500.0  # how far it may drift before returning
+    drift_radius_m: float = 500.0  # within this of the last waypoint counts as arrived
     arrive_by: datetime | None = None
     hold_until: datetime | None = None
     min_reserve_pct: float = 30.0

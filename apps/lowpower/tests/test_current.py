@@ -54,6 +54,19 @@ class Estimate(unittest.TestCase):
         self.assertEqual(C.blend((0.0, 0.0), (1.0, 2.0), 0.5), (0.5, 1.0))
 
 
+class TopSpeed(unittest.TestCase):
+    def test_short_of_the_command_means_at_the_limit(self):
+        self.assertAlmostEqual(C.learn_top_speed(None, 1.2, 0.7, 0.3), 0.3)
+        self.assertAlmostEqual(C.learn_top_speed(0.5, 1.2, 0.7, 0.3), 0.44)
+
+    def test_making_the_command_faster_raises_the_cap(self):
+        self.assertEqual(C.learn_top_speed(0.3, 0.6, 0.6, 0.5), 0.5)
+
+    def test_otherwise_nothing_learnt(self):
+        self.assertIsNone(C.learn_top_speed(None, 0.6, 0.6, 0.4))
+        self.assertEqual(C.learn_top_speed(0.5, 0.6, 0.6, 0.4), 0.5)
+
+
 class Model(unittest.TestCase):
     def test_fitted_params_ship_with_the_package(self):
         self.assertEqual(P.capacity_wh, 2200)

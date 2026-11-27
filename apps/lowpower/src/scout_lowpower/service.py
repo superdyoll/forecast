@@ -104,6 +104,7 @@ class Telemetry:
         self.sog = None
         self.ground = deque()  # (monotonic t, north m/s, east m/s) over ground
         self.heading = None  # degrees, from VFR_HUD
+        self.headings = deque()  # (monotonic t, unit north, unit east)
 
     def update(self, msg: dict, now: float) -> None:
         n = msg["name"]
@@ -135,13 +136,26 @@ class Telemetry:
         elif n == "VFR_HUD":
             self.sog = msg["groundspeed"]
             self.heading = msg["heading"]
-        for q in (self.load, self.solar, self.ground):
+            h = math.radians(msg["heading"])
+            self.headings.append((now, math.cos(h), math.sin(h)))
+        for q in (self.load, self.solar, self.ground, self.headings):
             while q and now - q[0][0] > 900:
                 q.popleft()
 
     def mean(self, q, window_s: float, now: float):
         v = [w for t, w in q if now - t <= window_s]
         return sum(v) / len(v) if v else None
+
+    def mean_heading(self, window_s: float, now: float):
+        """Heading over the window as a vector mean (degrees), or None. The
+        window spans turns at waypoints: the last heading would misread it."""
+        v = [(n, e) for t, n, e in self.headings if now - t <= window_s]
+        if not v:
+            return None
+        n, e = sum(x[0] for x in v), sum(x[1] for x in v)
+        if math.hypot(n, e) < 0.5 * len(v):  # turning a lot: no clear heading
+            return None
+        return math.degrees(math.atan2(e, n)) % 360
 
     def ground_velocity(self, window_s: float, now: float):
         v = [(n, e) for t, n, e in self.ground if now - t <= window_s]
@@ -252,6 +266,8 @@ class Service:
         self.uploaded = None  # signature of the mission items onboard
         self.cloud_obs = []  # [epoch, observed W, clear-sky W], last 24 h
         self.current = (0.0, 0.0)  # estimated water current (north, east) m/s
+        self.current_mean = (0.0, 0.0)  # its ~24 h average (residual drift)
+        self.stw_max = None  # top speed through the water seen in practice
         self.was_armed = False
         self.override = False
         self.need_decide = True
@@ -277,6 +293,8 @@ class Service:
         self.uploaded = d.get("uploaded")
         self.cloud_obs = d.get("cloud_obs", [])
         self.current = tuple(d.get("current") or (0.0, 0.0))
+        self.stw_max = d.get("stw_max")
+        self.current_mean = tuple(d.get("current_mean") or (0.0, 0.0))
         self.was_armed = d.get("was_armed", False)
         self.override = d.get("override", False)
         if d.get("plan"):
@@ -297,6 +315,8 @@ class Service:
             "uploaded": self.uploaded,
             "cloud_obs": self.cloud_obs[-200:],
             "current": list(self.current),
+            "stw_max": self.stw_max,
+            "current_mean": list(self.current_mean),
             "was_armed": self.was_armed,
             "override": self.override,
             "plan": self.plan.to_dict() if self.plan else None,
@@ -328,6 +348,7 @@ class Service:
                 "east_ms": round(self.current[1], 3),
                 "speed_ms": round(math.hypot(*self.current), 3),
             },
+            "stw_max_ms": None if self.stw_max is None else round(self.stw_max, 3),
             "cloud": self._cloud(),
             "starlink_advice": self.plan and self.plan.starlink_duty,
             "state": s
@@ -360,6 +381,7 @@ class Service:
                             "action": self.plan.action,
                             "speed_ms": self.plan.speed_ms,
                             "current_ms": [round(c, 3) for c in self.current],
+                            "stw_max_ms": self.stw_max,
                             "min_pct": self.plan.min_pct,
                             "forecast": self.plan.forecast,
                         }
@@ -469,11 +491,18 @@ class Service:
             self._resync(now)
         if self.mission and self._every("status", 15.0, now):
             self._publish(None, history=False)
-        if self._every("observe", 60.0, now):
+        # Once a boat minute (every few real seconds on a fast simulated clock).
+        if self._every("observe", max(5.0, 60.0 / clock.rate()), now):
             self._observe(now)
         if (self.need_decide or now >= self.next_decide) and self.mission:
             self._decide(now)
-        if self.ap.online and self.plan and not self.st.dry_run and not self.override:
+        if (
+            self.ap.online
+            and self.plan
+            and not self.st.dry_run
+            and not self.override
+            and not self.ap.boot_unknown(now)  # reboot or operator? wait to see
+        ):
             self._enforce(now)
 
     # -- mission file --------------------------------------------------------
@@ -682,16 +711,24 @@ class Service:
         t, pl = self.tel, self.plan
         if not pl or pl.since is None or (_now() - pl.since).total_seconds() < 600:
             return  # let the boat settle into the plan first (boat seconds)
-        # Telemetry windows are in real seconds: scale by the clock rate.
-        window = max(30.0, 600 / clock.rate())
+        # Average over a whole Starlink cycle: propulsion = load - hotel -
+        # Starlink, and Starlink comes in sessions, so a shorter window can be
+        # all-on or all-off (+-15 W, more than the propulsion itself at low
+        # speed). Telemetry windows are in real seconds: scale by the clock rate.
+        window = max(30.0, max(600.0, self.st.starlink_period_s) / clock.rate())
         ground = t.ground_velocity(window, now)
         if ground is None:
             return
+        # Transit (AUTO) and station-keeping (LOITER) both motor; in LOITER the
+        # boat points into the current, so the same estimate applies.
+        heading = t.mean_heading(window, now)
         motoring = (
-            pl.action == "transit"
-            and self.ap.mode == M.MODE_AUTO
+            (
+                (pl.action == "transit" and self.ap.mode == M.MODE_AUTO)
+                or (pl.action == "hold" and self.ap.mode == M.MODE_LOITER)
+            )
             and self.ap.armed
-            and t.heading is not None
+            and heading is not None
         )
         drifting = (
             pl.action in ("pause", "drift")
@@ -706,12 +743,19 @@ class Service:
                 E.load_component(self.params, "hotel_w")
                 + E.load_component(self.params, "starlink_w") * pl.starlink_duty
             )
-            obs = C.from_thrust(self.params, ground, t.heading, load - base)
+            obs = C.from_thrust(self.params, ground, heading, load - base)
+            if pl.action == "transit" and pl.speed_ms:
+                stw = E.stw_for_power(self.params, load - base)
+                self.stw_max = C.learn_top_speed(
+                    self.stw_max, pl.speed_ms, math.hypot(*ground), stw
+                )
         elif drifting:
             obs = C.from_drift(ground)
         else:
             return
         self.current = C.blend(self.current, obs, 0.3)
+        # Observed about once a boat minute: a ~24 h average of the same.
+        self.current_mean = C.blend(self.current_mean, obs, 60.0 / 86400)
         log.debug(
             "current estimate %.2f m/s (n %.2f, e %.2f)",
             math.hypot(*self.current),
@@ -748,6 +792,8 @@ class Service:
             battery_w=t.battery_w,
             cloud=self._cloud(),
             current_ms=self.current,
+            stw_max_ms=self.stw_max,
+            current_mean_ms=self.current_mean,
             at_final=bool(
                 self.mission
                 and self.mission.kind == "transit"
@@ -803,8 +849,12 @@ class Service:
         An override is a *change* from a mode the service uses (AUTO, HOLD,
         LOITER) to one it doesn't, made by someone else: not the mode the
         autopilot happens to start in, not a restart, and not the heartbeats
-        that still show the old mode just after our own command.
+        that still show the old mode just after our own command. Just after a
+        reconnect, until the boot clock says whether the autopilot rebooted
+        (Autopilot.boot_unknown), a changed mode can't be judged: wait.
         """
+        if self.ap.boot_unknown(now):
+            return
         mode, prev = self.ap.mode, self.prev_mode
         self.prev_mode = mode
         if mode == self.mode_cmd_want:

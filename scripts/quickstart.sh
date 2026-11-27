@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # From a fresh clone to the simulation in your browser, in one command.
 #
-#   scripts/quickstart.sh                  # install into .venv, run the simulation at 20x
+#   scripts/quickstart.sh                  # install into .venv, run the simulation (20x; 5x on arm64)
 #   scripts/quickstart.sh --install-only   # just install (and check the install works)
 #   scripts/quickstart.sh --test           # install, then run every app's unit tests
 #   SIM_RATE=1 scripts/quickstart.sh       # real time instead of 20x
@@ -91,7 +91,13 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
 fi
 
 # --- 5. Run: SITL + scout-sim + scout-lowpower + scout-web, fresh output dir.
-export SIM_RATE="${SIM_RATE:-20}"
+# SITL's image is x86-64: emulated on arm64 (Apple silicon) it manages only
+# ~5.5x, and a faster clock makes the boat lag it (scout-sim warns).
+if [ -z "${SIM_RATE:-}" ]; then
+  case "$(uname -m)" in x86_64 | amd64) SIM_RATE=20 ;; *) SIM_RATE=5 ;; esac
+fi
+export SIM_RATE
+export SIM_FRESH="${SIM_FRESH:-1}"  # new SITL each run: an old one has the boat elsewhere
 export SIM_WORK="${SIM_WORK:-$repo/sim-run/$(date +%Y%m%dT%H%M%S)}"
 export PYTHON="$VPY"
 say "starting the simulation at ${SIM_RATE}x (output: $SIM_WORK)"
