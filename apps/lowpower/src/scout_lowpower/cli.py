@@ -65,19 +65,19 @@ def _settings(a) -> Settings:
 
 
 def _params(st: Settings) -> E.Params:
+    """--params / SCOUT_PARAMS, else the fitted model shipped with
+    scout-forecast. A missing or bad file falls back too: under systemd,
+    crash-looping over it would leave the boat without a planner."""
     if st.params:
         try:
             return E.Params.from_dict(json.loads(st.params.read_text()))
         except (OSError, ValueError, TypeError) as e:
-            # Don't crash-loop under systemd over a missing or bad file.
             log.error(
-                "can't read energy params %s (%s); using built-in defaults",
-                st.params,
-                e,
+                "can't read energy params %s (%s); using the shipped fit", st.params, e
             )
-            return E.Params()
-    log.warning("no energy params (--params / SCOUT_PARAMS); using built-in defaults")
-    return E.Params()
+    else:
+        log.info("energy model: the fit shipped with scout-forecast (no --params)")
+    return E.fitted_params()
 
 
 def _pos(s: str):

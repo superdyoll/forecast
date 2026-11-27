@@ -59,7 +59,7 @@ sudo apt install ./scout*_"$version"_all.deb  # forecast + lowpower + web; units
 # or from a copy of all the release's files (debs + Packages + Release):
 #   echo "deb [trusted=yes] file:/srv/scout ./" | sudo tee /etc/apt/sources.list.d/scout.list
 #   sudo apt update && sudo apt install scout
-sudo cp params.json /etc/scout/params.json    # energy model from scout-evaluate
+# /etc/scout/params.json is the 17-day fit; replace it if you have a newer one
 sudoedit /etc/scout/scout.env                 # SCOUT_MAVLINK etc.; kept across upgrades
 sudo systemctl restart scout-lowpower
 sudo -u scout scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --reserve 30

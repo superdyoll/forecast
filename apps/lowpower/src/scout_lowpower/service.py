@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import signal
 import socket
@@ -38,6 +39,7 @@ from pathlib import Path
 from scout_forecast import clock
 from scout_forecast import energy as E
 
+from . import current as C
 from . import mavlink as M
 from . import planner as P
 from .mission import Mission, write_atomic
@@ -47,7 +49,6 @@ log = logging.getLogger("scout_lowpower")
 
 SERVICE_MODES = (M.MODE_AUTO, M.MODE_HOLD, M.MODE_LOITER)
 HEARTBEAT_TIMEOUT_S = 5.0
-LOAD_FACTOR_MAX = 8.0
 REBOOT_GRACE_S = 60.0  # after a restart, the autopilot's own mode isn't an override
 # After a reconnect, how long to wait for the boot clock (GLOBAL_POSITION_INT)
 # that tells a reboot from a link blip, before trusting the armed state again.
@@ -101,11 +102,14 @@ class Telemetry:
         self.solar = deque()
         self.mission_seq = None
         self.sog = None
+        self.ground = deque()  # (monotonic t, north m/s, east m/s) over ground
+        self.heading = None  # degrees, from VFR_HUD
 
     def update(self, msg: dict, now: float) -> None:
         n = msg["name"]
         if n == "GLOBAL_POSITION_INT" and (msg["lat"] or msg["lon"]):
             self.lat, self.lon, self.pos_t = msg["lat"] / 1e7, msg["lon"] / 1e7, now
+            self.ground.append((now, msg["vx"] / 100, msg["vy"] / 100))
         elif (
             n == "SYS_STATUS"
             and 0 < msg["voltage_battery"] < 65535
@@ -130,13 +134,20 @@ class Telemetry:
             self.mission_seq = msg["seq"]
         elif n == "VFR_HUD":
             self.sog = msg["groundspeed"]
-        for q in (self.load, self.solar):
+            self.heading = msg["heading"]
+        for q in (self.load, self.solar, self.ground):
             while q and now - q[0][0] > 900:
                 q.popleft()
 
     def mean(self, q, window_s: float, now: float):
         v = [w for t, w in q if now - t <= window_s]
         return sum(v) / len(v) if v else None
+
+    def ground_velocity(self, window_s: float, now: float):
+        v = [(n, e) for t, n, e in self.ground if now - t <= window_s]
+        if not v:
+            return None
+        return sum(x[0] for x in v) / len(v), sum(x[1] for x in v) / len(v)
 
     def battery_pct(self) -> float | None:
         if self.volt is None:
@@ -240,7 +251,7 @@ class Service:
         self.plan: P.Plan | None = None
         self.uploaded = None  # signature of the mission items onboard
         self.cloud_obs = []  # [epoch, observed W, clear-sky W], last 24 h
-        self.load_factor = 1.0
+        self.current = (0.0, 0.0)  # estimated water current (north, east) m/s
         self.was_armed = False
         self.override = False
         self.need_decide = True
@@ -265,7 +276,7 @@ class Service:
             return
         self.uploaded = d.get("uploaded")
         self.cloud_obs = d.get("cloud_obs", [])
-        self.load_factor = d.get("load_factor", 1.0)
+        self.current = tuple(d.get("current") or (0.0, 0.0))
         self.was_armed = d.get("was_armed", False)
         self.override = d.get("override", False)
         if d.get("plan"):
@@ -274,9 +285,9 @@ class Service:
             except (KeyError, TypeError, ValueError):
                 self.plan = None
         log.info(
-            "restored state: plan=%s load_factor=%.2f override=%s",
+            "restored state: plan=%s current=%.2f m/s override=%s",
             self.plan and self.plan.action,
-            self.load_factor,
+            math.hypot(*self.current),
             self.override,
         )
 
@@ -285,7 +296,7 @@ class Service:
             "saved_at": _now().isoformat(),
             "uploaded": self.uploaded,
             "cloud_obs": self.cloud_obs[-200:],
-            "load_factor": self.load_factor,
+            "current": list(self.current),
             "was_armed": self.was_armed,
             "override": self.override,
             "plan": self.plan.to_dict() if self.plan else None,
@@ -312,7 +323,11 @@ class Service:
                 "armed": self.ap.armed,
             },
             "override": self.override,
-            "load_factor": round(self.load_factor, 3),
+            "current": {
+                "north_ms": round(self.current[0], 3),
+                "east_ms": round(self.current[1], 3),
+                "speed_ms": round(math.hypot(*self.current), 3),
+            },
             "cloud": self._cloud(),
             "starlink_advice": self.plan and self.plan.starlink_duty,
             "state": s
@@ -344,6 +359,7 @@ class Service:
                             "mode": M.ROVER_MODES.get(self.ap.mode, self.ap.mode),
                             "action": self.plan.action,
                             "speed_ms": self.plan.speed_ms,
+                            "current_ms": [round(c, 3) for c in self.current],
                             "min_pct": self.plan.min_pct,
                             "forecast": self.plan.forecast,
                         }
@@ -658,28 +674,49 @@ class Service:
             self.cloud_obs.append([_now().timestamp(), solar, clear])
         cutoff = _now().timestamp() - 86400
         self.cloud_obs = [o for o in self.cloud_obs if o[0] >= cutoff]
-        pl = self.plan
-        if (
-            pl
-            and pl.action == "transit"
-            and pl.speed_ms
+        self._observe_current(now)
+
+    def _observe_current(self, now):
+        """Estimate the water current (current.py): under thrust from measured
+        propulsion power and heading, or with motors off from the drift."""
+        t, pl = self.tel, self.plan
+        if not pl or pl.since is None or (_now() - pl.since).total_seconds() < 600:
+            return  # let the boat settle into the plan first (boat seconds)
+        # Telemetry windows are in real seconds: scale by the clock rate.
+        window = max(30.0, 600 / clock.rate())
+        ground = t.ground_velocity(window, now)
+        if ground is None:
+            return
+        motoring = (
+            pl.action == "transit"
             and self.ap.mode == M.MODE_AUTO
             and self.ap.armed
-            and pl.since is not None
-            and (_now() - pl.since).total_seconds() > 600  # simulated/boat seconds
-        ):
-            # Telemetry windows are in real seconds: scale by the clock rate.
-            load = t.mean(t.load, max(30.0, 600 / clock.rate()), now)
-            prop = E.propulsion_w(self.params, pl.speed_ms)
+            and t.heading is not None
+        )
+        drifting = (
+            pl.action in ("pause", "drift")
+            and not pl.returning
+            and (self.ap.mode == M.MODE_HOLD or not self.ap.armed)
+        )
+        if motoring:
+            load = t.mean(t.load, window, now)
+            if load is None:
+                return
             base = (
                 E.load_component(self.params, "hotel_w")
                 + E.load_component(self.params, "starlink_w") * pl.starlink_duty
             )
-            if load is not None and prop > 1:
-                # Wide limits: crabbing across a current or pushing into one can
-                # cost several times the still-water power for the same command.
-                obs = min(LOAD_FACTOR_MAX, max(0.3, (load - base) / prop))
-                self.load_factor = 0.8 * self.load_factor + 0.2 * obs
+            obs = C.from_thrust(self.params, ground, t.heading, load - base)
+        elif drifting:
+            obs = C.from_drift(ground)
+        else:
+            return
+        self.current = C.blend(self.current, obs, 0.3)
+        log.debug(
+            "current estimate %.2f m/s (n %.2f, e %.2f)",
+            math.hypot(*self.current),
+            *self.current,
+        )
 
     def _cloud(self):
         obs = [o for o in self.cloud_obs if o[2] > 20]
@@ -710,7 +747,7 @@ class Service:
             next_wp=next_wp,
             battery_w=t.battery_w,
             cloud=self._cloud(),
-            load_factor=self.load_factor,
+            current_ms=self.current,
             at_final=bool(
                 self.mission
                 and self.mission.kind == "transit"

@@ -26,6 +26,7 @@ Every component is fitted from the telemetry (see REPORT.md):
 
 from __future__ import annotations
 
+import json
 import math
 import statistics
 from dataclasses import asdict, dataclass, field
@@ -434,12 +435,45 @@ LOAD_DEFAULTS = {
     "auto_propulsion_w": 60.0,
     "auto_sog_median": 0.8,
     "mode17_propulsion_w": 5.0,
+    # AUTO propulsion over ground levels off at ~73 W from 1.1 m/s: read as the
+    # throttle limit, i.e. the boat's top speed through the water.
+    "max_propulsion_w": 73.0,
 }
+
+
+def fitted_params() -> Params:
+    """The model fitted on all 17 days of telemetry, shipped with the package
+    (fitted_params.json). The default whenever no params.json is configured."""
+    from importlib.resources import files
+
+    text = files("scout_forecast").joinpath("fitted_params.json").read_text()
+    return Params.from_dict(json.loads(text))
 
 
 def load_component(p: Params, name: str) -> float:
     v = p.load.get(name)
     return float(v) if v is not None else LOAD_DEFAULTS[name]
+
+
+def max_propulsion_w(p: Params) -> float:
+    """The most propulsion AUTO ever drew: the plateau of the fitted
+    power-over-ground bins (with at least 20 steps), else the default."""
+    bins = p.load.get("auto_propulsion_by_sog") or []
+    seen = [w for _, w, n in bins if n >= 20]
+    return max(seen) if seen else LOAD_DEFAULTS["max_propulsion_w"]
+
+
+def stw_for_power(p: Params, watts: float) -> float:
+    """Speed through the water that `watts` of propulsion holds: the inverse
+    of propulsion_w. Used to read speed through the water off the load."""
+    ref_v = max(load_component(p, "auto_sog_median"), 0.1)
+    ref_w = max(load_component(p, "auto_propulsion_w"), 1e-6)
+    return ref_v * (max(watts, 0.0) / ref_w) ** (1 / 3)
+
+
+def max_stw_ms(p: Params) -> float:
+    """The boat's top speed through the water (~0.85 m/s with the fitted model)."""
+    return stw_for_power(p, max_propulsion_w(p))
 
 
 def propulsion_w(p: Params, speed_ms: float) -> float:

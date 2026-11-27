@@ -135,3 +135,18 @@ def remaining_m(m: Mission, pos, next_wp: int) -> float:
     for a, b in zip(m.waypoints[i:], m.waypoints[i + 1 :]):
         d += distance_m(a, b)
     return d
+
+
+def legs(m: Mission, pos, next_wp: int) -> list:
+    """The route still to go as [(length m, (unit north, unit east)), ...]:
+    from `pos` to waypoint `next_wp`, then along the rest. Directions use a
+    local flat-earth approximation, fine over a leg of a few km."""
+    pts = [pos] + list(m.waypoints[min(max(next_wp, 0), len(m.waypoints) - 1) :])
+    out = []
+    for a, b in zip(pts, pts[1:]):
+        n = math.radians(b[0] - a[0]) * EARTH_R
+        e = math.radians(b[1] - a[1]) * EARTH_R * math.cos(math.radians(a[0]))
+        norm = math.hypot(n, e)
+        if norm > 0.5:
+            out.append((distance_m(a, b), (n / norm, e / norm)))
+    return out

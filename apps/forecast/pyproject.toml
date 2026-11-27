@@ -23,6 +23,9 @@ scout-data = "scout_forecast.data:main"
 [tool.setuptools.dynamic]
 version = { attr = "scout_forecast.__version__" }
 
+[tool.setuptools.package-data]
+scout_forecast = ["fitted_params.json"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["scout_forecast*"]

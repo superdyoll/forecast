@@ -10,7 +10,8 @@ One deb per app, all at the version of the wheels, each pinned to the others
 with ``(= version)`` so apt never mixes releases:
 
   scout-forecast  energy model + `forecast`, `scout-data`, `scout-evaluate`
-  scout-lowpower  the boat service: unit, /etc/scout/scout.env, `scout` user
+  scout-lowpower  the boat service: unit, /etc/scout/scout.env
+                  and params.json, `scout` user
   scout-web       the web page and its unit
   scout-sim       simulation only (SITL in docker + scout-sim); never on the boat.
                   Depends on docker; pulls the SITL image on first run.
@@ -113,8 +114,14 @@ PACKAGES = {
         depends=[PY, "scout-forecast (= {v})", "adduser"],
         description="Scout low-power mission mode: planner and ArduPilot service",
         units=["scout-lowpower.service"],
-        files={"etc/scout/scout.env": PACKAGING / "scout.env.example"},
-        conffiles=["/etc/scout/scout.env"],
+        # The fitted energy model as an editable conffile: replace it with a
+        # newer scout-evaluate fit and apt keeps it across upgrades.
+        files={
+            "etc/scout/scout.env": PACKAGING / "scout.env.example",
+            "etc/scout/params.json": ROOT
+            / "apps/forecast/src/scout_forecast/fitted_params.json",
+        },
+        conffiles=["/etc/scout/scout.env", "/etc/scout/params.json"],
         scripts={"scout-lowpower": LOWPOWER_WRAPPER},
         postinst=ADD_USER,
         purge="rm -rf /var/lib/scout-lowpower",

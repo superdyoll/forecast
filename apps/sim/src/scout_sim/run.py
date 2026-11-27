@@ -309,18 +309,16 @@ def main(argv=None) -> int:
 
 
 def load_params(path: str | None) -> E.Params:
-    """The fitted energy model, or the built-in defaults. A missing or bad file
-    (e.g. no /etc/scout/params.json yet) falls back instead of crash-looping,
-    as the service does."""
+    """The energy model the simulator's power curve is built on: `path`, else
+    the fit shipped with scout-forecast. A missing or bad file falls back
+    instead of crash-looping, as the service does."""
     if not path:
-        return E.Params()
+        return E.fitted_params()
     try:
         return E.Params.from_dict(json.loads(Path(path).read_text()))
     except (OSError, ValueError, TypeError) as e:
-        log.warning(
-            "can't read energy params %s (%s); using built-in defaults", path, e
-        )
-        return E.Params()
+        log.warning("can't read energy params %s (%s); using the shipped fit", path, e)
+        return E.fitted_params()
 
 
 if __name__ == "__main__":

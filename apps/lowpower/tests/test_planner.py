@@ -99,10 +99,44 @@ class TransitDecisions(unittest.TestCase):
         self.assertNotEqual(p.speed_ms, 0.6)
         self.assertGreater(p.since, T0)
 
-    def test_heavier_load_factor_means_slower(self):
-        normal = decide(state(60), transit(), PARAMS)
-        headwind = decide(state(60, load_factor=2.5), transit(), PARAMS)
-        self.assertLessEqual(headwind.speed_ms, normal.speed_ms)
+
+class Current(unittest.TestCase):
+    """The track runs due north; ArduPilot holds speed over ground."""
+
+    AGAINST = (-0.3, 0.0)  # water going south
+    WITH = (0.3, 0.0)
+
+    def test_opposing_current_costs_more_for_the_same_arrival(self):
+        m = transit(arrive_by=T0 + timedelta(hours=40))
+        calm = decide(state(70), m, PARAMS)
+        against = decide(state(70, current_ms=self.AGAINST), m, PARAMS)
+        self.assertLessEqual(against.eta, m.arrive_by)
+        self.assertLess(against.min_pct, calm.min_pct)
+        self.assertTrue(any("against" in r for r in against.reasons))
+
+    def test_following_current_is_cheaper(self):
+        m = transit(arrive_by=T0 + timedelta(hours=40))
+        calm = decide(state(70), m, PARAMS)
+        helped = decide(state(70, current_ms=self.WITH), m, PARAMS)
+        self.assertGreater(helped.min_pct, calm.min_pct)
+        self.assertTrue(any("with the boat" in r for r in helped.reasons))
+
+    def test_speeds_beyond_reach_collapse_to_the_slowest_command(self):
+        # Top speed through the water ~0.85 m/s: against 0.5 m/s the boat makes
+        # ~0.35 m/s over ground whatever it asks for above that.
+        m = transit()  # no deadline: it would pick the fastest otherwise
+        p = decide(state(95, current_ms=(-0.5, 0.0)), m, PARAMS)
+        self.assertEqual(p.action, "transit")
+        self.assertLessEqual(p.speed_ms, 0.4)
+        # The plan never claims more over ground than the hull can make.
+        hours = (p.eta - T0).total_seconds() / 3600
+        reach = E.max_stw_ms(PARAMS) - 0.5
+        self.assertGreaterEqual(hours, 33_000 / reach / 3600)
+
+    def test_current_faster_than_the_boat_pauses(self):
+        p = decide(state(70, current_ms=(-1.0, 0.0)), transit(), PARAMS)
+        self.assertEqual(p.action, "pause")
+        self.assertTrue(any("no headway" in r for r in p.reasons))
 
 
 class StationDecisions(unittest.TestCase):
@@ -121,7 +155,8 @@ class StationDecisions(unittest.TestCase):
         self.assertEqual(p.action, "hold")
 
     def test_drifts_and_returns_when_far(self):
-        tight = state(34, t=T0.replace(hour=21), cloud=0.1, load_factor=3.0)
+        # Stemming a 0.8 m/s current takes ~50 W: too much at night with 34 %.
+        tight = state(34, t=T0.replace(hour=21), cloud=0.1, current_ms=(0.8, 0.0))
         p = decide(tight, self.station(), PARAMS)
         self.assertEqual(p.action, "drift")
         far = BoatState(
@@ -131,7 +166,7 @@ class StationDecisions(unittest.TestCase):
             battery_pct=34,
             volt=21.7,
             cloud=0.1,
-            load_factor=3.0,
+            current_ms=(0.8, 0.0),
         )  # ~1.1 km away
         self.assertTrue(decide(far, self.station(), PARAMS).returning)
 
