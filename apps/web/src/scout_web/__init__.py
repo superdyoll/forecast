@@ -1,3 +1,3 @@
 """Forecast-against-actual web page for Scout (`scout-web`)."""
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
