@@ -4,7 +4,8 @@ ArduPilot over MAVLink. Standard library plus the scout-forecast energy model.
   planner  - pure decision logic (testable without an autopilot)
   mission  - operator mission file and geometry
   mavlink  - minimal MAVLink v2 codec and self-reconnecting links
-  service  - the boat-side service and the `scout-lowpower` command
+  service  - the boat-side service: telemetry, decisions, commands, recovery
+  cli      - the `scout-lowpower` command (run, set-mission, status, plan)
 """
 
 __version__ = "0.1.0"

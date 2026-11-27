@@ -2,6 +2,6 @@
 
 import sys
 
-from .service import main
+from .cli import main
 
 sys.exit(main())

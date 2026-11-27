@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 [project.scripts]
-scout-lowpower = "scout_lowpower.service:main"
+scout-lowpower = "scout_lowpower.cli:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "scout_lowpower.__version__" }
