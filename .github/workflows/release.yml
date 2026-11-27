@@ -35,7 +35,17 @@ permissions:
 
 jobs:
   release:
-    if: github.ref == 'refs/heads/main'
+    # Never release our own release commit. Three independent guards stop the
+    # loop "release commit -> push -> release": (1) pushes made with
+    # GITHUB_TOKEN never start workflow runs; (2) the commit says [skip ci];
+    # (3) this check, which holds even with a RELEASE_TOKEN (whose pushes do
+    # start runs) and whatever GitHub decides about [skip ci] in a push.
+    # The tag push can't start a run either: `on.push` filters branches only.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      !(github.event_name == 'push' &&
+        github.event.head_commit.author.name == 'github-actions[bot]' &&
+        startsWith(github.event.head_commit.message, 'Release v'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
