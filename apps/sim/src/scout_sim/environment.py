@@ -52,19 +52,29 @@ class EnvConfig:
 
 
 def env_config(seed: int, storm: str | None, storm_cloud: float) -> EnvConfig:
-    """EnvConfig, with a storm from `storm` = 'START_H:HOURS' if given."""
+    """EnvConfig, with a storm from `storm` = 'START_H:HOURS[:RAMP_H]' if given.
+    Without RAMP_H it ramps in and out over the default 6 h, but never over
+    more than a quarter of the storm, so a short one still reaches full."""
     if not storm:
         return EnvConfig(seed=seed)
-    h0, hours = (float(x) for x in storm.split(":")[:2])
+    parts = [float(x) for x in storm.split(":")]
+    if len(parts) not in (2, 3) or parts[1] <= 0:
+        raise ValueError(f"storm {storm!r}: expected START_H:HOURS[:RAMP_H]")
+    h0, hours = parts[:2]
+    ramp = parts[2] if len(parts) == 3 else min(EnvConfig.storm_ramp_h, hours / 4)
     return EnvConfig(
-        seed=seed, storm_start_h=h0, storm_hours=hours, storm_cloud=storm_cloud
+        seed=seed,
+        storm_start_h=h0,
+        storm_hours=hours,
+        storm_ramp_h=ramp,
+        storm_cloud=storm_cloud,
     )
 
 
 def add_storm_args(ap) -> None:
     ap.add_argument(
         "--storm",
-        metavar="START_H:HOURS",
+        metavar="START_H:HOURS[:RAMP_H]",
         help="overcast and gales from START_H for HOURS (24:72: day 2, for 3 days)",
     )
     ap.add_argument(

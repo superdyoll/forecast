@@ -243,6 +243,7 @@ class Sim:
                 "wind_ms": round(wspd, 2),
                 "wind_from": round(wfrom),
                 "cloud": round(cloud, 3),
+                "storm": round(self.env.storm(t), 2),
                 "armed": self.armed,
                 "mode": M.ROVER_MODES.get(self.mode, self.mode),
                 **{
@@ -309,6 +310,8 @@ def main(argv=None) -> int:
         "fast", help="fast-time simulation without SITL (days in seconds)"
     )
     fast.add_args(f)
+    sc = sub.add_parser("score", help="score SITL runs (run_sitl.sh / sim-batch.sh)")
+    sc.add_argument("runs", nargs="+", type=Path, help="run directories")
     a = ap.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
@@ -318,6 +321,11 @@ def main(argv=None) -> int:
         return 0
     if a.cmd == "fast":
         print(json.dumps(fast.run(a), indent=1))
+        return 0
+    if a.cmd == "score":
+        from .score import score, table
+
+        print(table([score(r) for r in a.runs]))
         return 0
     model = E.load_params(a.params)
     try:

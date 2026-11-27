@@ -31,7 +31,8 @@ emulated=""
 for f in /proc/sys/fs/binfmt_misc/*; do
   case "${f##*/}" in *x86*64* | *X86*64* | *rosetta*) emulated=1 ;; esac
 done
-if [ "$(uname -m)" != x86_64 ] && [ -z "$emulated" ]; then
+# (Linux only: Docker Desktop on macOS emulates it inside its own VM.)
+if [ "$(uname -s)" = Linux ] && [ "$(uname -m)" != x86_64 ] && [ -z "$emulated" ]; then
   echo "warning: no x86-64 emulation registered; if SITL fails with 'exec format error'," \
     "apt install qemu-user-static binfmt-support" >&2
 fi

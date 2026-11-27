@@ -8,6 +8,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
+from scout_forecast import clock
 from scout_sim import environment as env
 from scout_sim import run
 
@@ -71,6 +72,15 @@ class Storm(unittest.TestCase):
             (3, 24.0, 72.0, 0.1),
         )
         self.assertIsNone(env.env_config(3, None, 0.1).storm_start_h)
+        self.assertEqual(env.env_config(3, "24:72", 0.1).storm_ramp_h, 6.0)
+        short = env.env_config(3, "0.5:2", 0.1)
+        self.assertEqual(short.storm_ramp_h, 0.5)  # a quarter: still reaches full
+        e = env.Environment(short, clock.parse_iso("2025-07-23T06:00Z"))
+        self.assertEqual(e.storm(clock.parse_iso("2025-07-23T07:30Z")), 1.0)
+        self.assertEqual(env.env_config(3, "1:4:2", 0.1).storm_ramp_h, 2.0)
+        for bad in ("24", "1:0", "a:b", "1:2:3:4"):
+            with self.assertRaises(ValueError):
+                env.env_config(3, bad, 0.1)
 
     def test_a_storm_on_station_is_survived_with_motors_off(self):
         s, out, tmp = fast(

@@ -9,7 +9,9 @@
 #
 # Settings (environment or .env): SIM_START, SIM_RATE, SIM_WORK (output dir),
 # SIM_MISSION (transit|station|keep), SIM_PCT0, SIM_FRESH (1: new SITL), DOCKER (for SIM_FRESH),
-# PYTHON, SCOUT_PARAMS.
+# PYTHON, SCOUT_PARAMS; SIM_SEED (weather), SIM_STORM (START_H:HOURS[:RAMP_H], see
+# scout-sim run --storm), SIM_ARRIVE_IN (transit deadline in hours, default 4; empty:
+# none).
 # Needs: pip install -r requirements-dev.txt (all apps, editable), and docker.
 set -euo pipefail
 
@@ -21,6 +23,12 @@ SIM_RATE="${SIM_RATE:-1}"
 SIM_WORK="${SIM_WORK:-$PWD/sim-run}"
 SIM_MISSION="${SIM_MISSION:-transit}"
 SIM_PCT0="${SIM_PCT0:-70}"
+SIM_SEED="${SIM_SEED:-1}"
+SIM_ARRIVE_IN="${SIM_ARRIVE_IN-4}"  # set but empty: no deadline
+storm=()
+if [ -n "${SIM_STORM:-}" ]; then storm=(--storm "$SIM_STORM"); fi
+deadline=()
+if [ -n "$SIM_ARRIVE_IN" ]; then deadline=(--arrive-in "$SIM_ARRIVE_IN"); fi
 
 mkdir -p "$SIM_WORK/state"
 export SCOUT_STATE_DIR="$SIM_WORK/state"
@@ -45,13 +53,14 @@ SCOUT_SITL_PARM_DIR="$here/sitl" "$here/../../packaging/sitl-container.sh" \
 # --- Demo mission (times are on the simulated clock)
 case "$SIM_MISSION" in
   transit) "$PYTHON" -m scout_lowpower set-mission \
-             --transit 60.215,2.210 60.230,2.240 60.240,2.200 --arrive-in 4 --reserve 30 ;;
+             --transit 60.215,2.210 60.230,2.240 60.240,2.200 ${deadline[@]+"${deadline[@]}"} --reserve 30 ;;
   station) "$PYTHON" -m scout_lowpower set-mission \
              --station 60.205,2.205 --radius 50 --drift-radius 400 --reserve 35 ;;
   keep) ;;
 esac
 
-"$PYTHON" -m scout_sim.run run --arm --pct0 "$SIM_PCT0" --truth "$SIM_WORK/sim-truth.jsonl" \
+"$PYTHON" -m scout_sim.run run --arm --pct0 "$SIM_PCT0" --seed "$SIM_SEED" \
+  ${storm[@]+"${storm[@]}"} --truth "$SIM_WORK/sim-truth.jsonl" \
   >"$SIM_WORK/sim.log" 2>&1 & pids+=($!)
 "$PYTHON" -m scout_lowpower run --power-link udpin:0.0.0.0:14601 \
   >"$SIM_WORK/lowpower.log" 2>&1 & pids+=($!)

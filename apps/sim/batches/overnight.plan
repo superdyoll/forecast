@@ -1,0 +1,19 @@
+# Overnight SITL batch: scripts/sim-batch.sh apps/sim/batches/overnight.plan runs/overnight 06:50
+# Ten runs of ~40 min at 5x (~3.3 simulated hours each). The transit is the demo
+# route (6.7 km, three legs); the station is 60.205,2.205. Reserve 30 % (station 35 %).
+# NAME [run_sitl.sh settings]
+transit-s1      SIM_SEED=1 SIM_ARRIVE_IN=3
+transit-s2      SIM_SEED=2 SIM_ARRIVE_IN=3
+transit-s3      SIM_SEED=3 SIM_ARRIVE_IN=3
+# Energy tight: starts 12 points above reserve + margin.
+transit-tight   SIM_SEED=4 SIM_PCT0=47 SIM_ARRIVE_IN=3
+# Starts at dusk: no sun for the whole run.
+transit-night   SIM_SEED=5 SIM_START=2025-07-23T20:00Z SIM_PCT0=60 SIM_ARRIVE_IN=3
+# No deadline: the planner chooses the speed.
+transit-free    SIM_SEED=6 SIM_ARRIVE_IN=
+station         SIM_MISSION=station SIM_SEED=7 SIM_PCT0=60
+# Storms: cloud to 8 % of clear sky and 20 m/s wind (~0.6 m/s leeway) for
+# 2.5-3 h, ramping in and out over a quarter of that.
+storm-transit   SIM_SEED=8 SIM_STORM=0.5:2.5 SIM_ARRIVE_IN=3
+storm-station   SIM_MISSION=station SIM_SEED=9 SIM_STORM=0.5:2.5 SIM_PCT0=50
+storm-tight     SIM_SEED=10 SIM_STORM=0.25:3 SIM_PCT0=47 SIM_ARRIVE_IN=3.5
