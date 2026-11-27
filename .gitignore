@@ -10,3 +10,4 @@ dist/
 *.egg-info/
 sim-run/
 lowpower-state/
+.claude/settings.local.json

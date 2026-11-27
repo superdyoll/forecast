@@ -3,6 +3,19 @@
 Battery forecast and low-power mission mode for Scout, a solar-electric robot
 boat. Standard library only (Python 3.9+), so it runs on the boat's computer.
 
+## Quick start
+
+```sh
+git clone https://github.com/superdyoll/forecast.git && cd forecast
+scripts/quickstart.sh          # installs into .venv, runs the simulation at 20x,
+                               # prints "READY http://127.0.0.1:8080"
+```
+
+Needs Python 3.9+ and docker running (the first run pulls the ArduPilot SITL
+image, several GB). `scripts/quickstart.sh --test` runs the tests instead. With
+Claude Code, just ask it to install and run: the `install-and-run` skill in
+`.claude/skills/` does the above.
+
 ## Apps
 
 Each app in `apps/` is its own wheel. Dependencies only point down the table.
