@@ -59,6 +59,7 @@ class Sim:
         self.truth_path = Path(a.truth)
         self.lat = self.lon = None
         self.vel = (0.0, 0.0)
+        self.heading = self.throttle = None  # VFR_HUD: degrees, %
         self.armed = False
         self.mode = None
         self.boot_ms = None
@@ -124,7 +125,7 @@ class Sim:
         self.sitl.command(SITL, cmd, *p)
 
     def request_streams(self):
-        for name, hz in (("GLOBAL_POSITION_INT", 2), ("SYS_STATUS", 1)):
+        for name, hz in (("GLOBAL_POSITION_INT", 2), ("SYS_STATUS", 1), ("VFR_HUD", 1)):
             self.command(M.MAV_CMD_SET_MESSAGE_INTERVAL, M.MESSAGES[name].id, 1e6 / hz)
         # Keep SITL's physics in step with the shared clock's rate.
         self.sitl.param_set(SITL, "SIM_SPEEDUP", clock.rate())
@@ -151,6 +152,8 @@ class Sim:
             self.check_pace(m["time_boot_ms"], now)
             self.lat, self.lon = m["lat"] / 1e7, m["lon"] / 1e7
             self.vel = (m["vx"] / 100, m["vy"] / 100)
+        elif n == "VFR_HUD":  # for the truth: does the hull move along its yaw?
+            self.heading, self.throttle = m["heading"], m["throttle"]
         elif n == "STATUSTEXT" and self.a.verbose:
             log.info("SITL: %s", m["text"])
 
@@ -235,6 +238,8 @@ class Sim:
                 "lat": lat,
                 "lon": lon,
                 "sog": round(math.hypot(*self.vel), 3),
+                "heading": self.heading,
+                "throttle": self.throttle,
                 "u_water": round(u, 3),
                 "current_n": round(cn, 3),
                 "current_e": round(ce, 3),
