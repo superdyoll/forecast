@@ -1,6 +1,6 @@
 # Scout energy forecast and low-power mode: report
 
-Status as of 2026-11-27. To install and run it, see the README:
+Status as of 2026-11-28. To install and run it, see the README:
 [Quick start](README.md#quick-start) (simulation from a clone) and
 [Install on the boat](README.md#install-on-the-boat-debianubuntu-apt) (debs, apt,
 systemd).
@@ -19,7 +19,7 @@ environment, power truth and planner without SITL.
 - **Starlink costs about 22 W,** twice the rest of the idle boat (about 10 W).
   Propulsion is the only bigger load.
 - **A physical energy-balance model forecasts well when the plan is known:**
-  3.11 points of error over 12 hours, against 7.69 for "stays the same". A Keras
+  3.23 points of error over 12 hours, against 7.69 for "stays the same". A Keras
   LSTM did worse than that baseline (7.99) and isn't used.
 - **The low-power mode works end to end in SITL:** it uploads the mission, holds
   speed, keeps the reserve, and survives autopilot restarts, link loss, its own
@@ -27,10 +27,11 @@ environment, power truth and planner without SITL.
 - **Current is now in the model.** ArduPilot holds speed *over ground*; power
   depends on speed *through the water*. The service estimates the current and the
   hull's real top speed from measured propulsion power. In one SITL run, the
-  1-hour forecast went from 7.6 points pessimistic to within 1 point. In another,
-  ArduPilot went faster than commanded and the forecast was optimistic: that's
-  the top open issue (see
-  [Current](#current-speed-over-ground-vs-through-the-water)).
+  1-hour forecast went from 7.6 points pessimistic to within 1 point. A batch
+  of ten overnight SITL runs, three with storms, kept every reserve and found
+  five estimator and planner bugs, now fixed. It also showed that SITL's hull
+  can't hold Scout's speeds, so SITL's speed and power figures are artefacts
+  (see [Overnight SITL batch](#overnight-sitl-batch-2026-11-28)).
 - **A 3-day storm used to run the battery flat.** Four fixes keep a boat that
   starts at 70 % above its reserve; weaker starts still dip below it, which only
   load-shedding or a weather forecast can fix (see [Storms](#storms)).
@@ -72,19 +73,23 @@ simulates the battery on a 15-minute grid:
   to current.
 
 The physical model and the LSTM were checked on the same 5 blocked, purged time
-folds (1,458 windows; `scout-evaluate` run `20261126T194630Z`). Every parameter
-was refitted per fold. Error is in battery-% points; lower is better.
+folds (1,458 windows; physical model: `scout-evaluate` run `20261127T233027Z`;
+LSTM: run `20261126T192216Z`). Every parameter was refitted per fold. Error is in
+battery-% points; lower is better.
 
 | Method | 1 h | 3 h | 6 h | 12 h | All |
 | --- | --- | --- | --- | --- | --- |
-| **Physical, known plan** | **0.96** | **2.07** | **3.30** | **4.87** | **3.11** |
-| Physical, blind | 1.65 | 3.45 | 6.25 | 11.84 | 6.44 |
+| **Physical, known plan** | **0.98** | **2.17** | **3.46** | **5.01** | **3.23** |
+| Physical, blind | 1.64 | 3.53 | 6.42 | 11.99 | 6.56 |
 | Stays the same | 1.84 | 4.66 | 8.18 | 12.40 | 7.69 |
 | Same as yesterday | 2.09 | 4.76 | 8.34 | 14.19 | 8.18 |
 | LSTM | 2.08 | 4.99 | 7.85 | 12.88 | 7.99 |
 
-- **The known-plan model wins in every fold and at every lead time.** At 1 hour it
-  is near the noise floor of a voltage reading (0.2-point steps plus sag).
+- **The known-plan model wins overall, and in every fold from 6 hours on.** In
+  the last fold (07-27 to 07-30, mostly after Starlink stopped) the blind model
+  is slightly better at 1 and 3 hours (0.69 against 0.71, 1.59 against 1.64). At
+  1 hour it is near the noise floor of a voltage reading (0.2-point steps plus
+  sag).
 - **Almost all the skill comes from knowing the load.** So the low-power mode
   forecasts from its own plan.
 - **The LSTM barely trained.** Early stopping chose epoch 1–2 in four folds, so it
@@ -95,17 +100,26 @@ was refitted per fold. Error is in battery-% points; lower is better.
 
 | Parameter | Folds | All data |
 | --- | --- | --- |
-| Capacity (Wh per 100 points) | 2,100–2,400 | 2,200 |
-| Sag (points per A) | 0.6–0.9 | 0.9 |
-| Clear-sky solar `k` (W) | 195–240 | 236 |
-| Average cloud factor | 0.60–0.69 | 0.63 |
+| Capacity (Wh per 100 points) | 2,100–2,400 | 2,300 |
+| Sag (points per A) | 0.7–0.9 | 0.8 |
+| Clear-sky solar `k` (W) | 241–365 | 361 |
+| Solar exponent `γ` | 1.75–2.5 | 2.5 |
+| Clock offset (h) | −0.75–0 | −0.75 |
+| Average cloud factor | 0.55–0.68 | 0.62 |
 
-**Not yet measured:**
-- **Bias direction.** Error grows about 0.35 points per hour, which suggests a
-  steady capacity or solar bias. Signed bias was added to `scout-evaluate` after
-  this run, so a fresh run will show the direction.
-- **Solar exponent.** `γ` came out at 1.5, the top of the old search grid; the grid
-  now goes to 2.5.
+**What the rerun changed.** The earlier run (`20261126T194630Z`: 3.11 overall,
+`γ` 1.5, `k` 236) had `γ` at the top of the old search grid. With the grid
+reaching 2.5 the fit chooses a sharper solar curve (`γ` 2.5, `k` 361): clear-sky
+output at the July noon sun at 60 N (about 50° up) rises from 158 to 185 W, and at
+20° falls from 47 to 25 W. It scores 0.02–0.16 points worse per lead time, within
+the spread between folds. `γ`
+again sits at the top of the grid, and it is chosen by how well it correlates
+with measured solar, not by forecast error: worth testing a wider grid, or
+choosing `γ` by forecast error. The shipped `fitted_params.json` is this run's
+all-data fit.
+
+**Bias.** The known-plan forecast is pessimistic by 1.2 points on average over
+all lead times (blind: 1.7): the boat did a little better than forecast.
 
 **Trust it for:** 6–12 hour forecasts under a given plan (about ±3–5 points), and
 comparing plans. It has only been checked between about 28 % and 100 %, so keep a
@@ -207,7 +221,8 @@ where AUTO power stops rising (about 73 W). It now ships with the package
 (`fitted_params.json`) and as `/etc/scout/params.json` in the deb, so a clone or
 an install without the private data uses the fit, not generic defaults.
 
-**SITL, 20 ×, demo transit (6.7 km, 4 h deadline), 1-hour forecast error:**
+**SITL, 20 ×, demo transit (6.7 km, 4 h deadline), 1-hour forecast error** (these
+runs used the earlier fit, `20261126T194630Z`):
 
 | Run | Current estimate error | 1 h error / bias | Stays the same |
 | --- | --- | --- | --- |
@@ -228,30 +243,120 @@ current, ArduPilot made 0.7–0.8 m/s over ground for a 0.3–0.4 m/s command, a
 at a few watts. See [Open issues](#open-issues).
 
 **Fast simulation, the same planner with and without the current estimate**
-(`scout-sim fast`, 0.75–2 days; error at 3 hours):
+(`scout-sim fast`, 0.75–2 days; error at 3 hours; rerun after the overnight
+batch's fixes, `runs/fast-20261128/`; the simulator's truth kept ~5–10 % off
+the model as before):
 
 | Scenario | Without | With | Stays the same |
 | --- | --- | --- | --- |
-| Transit, seeds 1/2/3 (all on time) | 1.89 / 2.66 / 1.60 | 1.68 / 2.71 / 1.42 | 5.1 / 3.1 / 3.5 |
-| Transit, slow hull (0.3 m/s), bias | −1.44 | −0.55 | 4.5 |
-| Station-keeping, 2 days, bias | +0.55 | +0.37 | 4.3 |
+| Transit, seeds 1/2/3 (all on time) | 1.33 / 2.87 / 1.19 | 1.32 / 2.94 / 1.06 | 5.03 / 3.17 / 3.65 |
+| Transit, slow hull (0.3 m/s), error / bias | 1.69 / −1.57 | 1.29 / −0.68 | 4.5 |
+| Station-keeping, 2 days, error / bias | 1.19 / +0.43 | 1.16 / +0.24 | 4.4 |
 
-Over a few hours the gain is modest. The large gains in SITL come from
-what the fast mode's simple boat doesn't have: a hull far slower than the model
-believed.
+On a hull as fast as the model believes, the estimate makes little difference
+over a few hours (about level on seeds 1 and 2, better on seed 3). It pays
+where the hull is slower than the model: there it halves the bias, as in SITL,
+where the large gains come from exactly that.
+
+## Overnight SITL batch (2026-11-28)
+
+Ten runs of about 3.4 simulated hours each, at 5 × (`scripts/sim-batch.sh
+apps/sim/batches/overnight.plan`, code as of `e546f46`; results in
+`runs/overnight-20261128/`, scored with `scout-sim score`). Transits are the
+demo route (6.7 km, three legs) with a 3-hour deadline unless noted. Storms
+are 2.5–3 hours of cloud to 8 % of clear sky and 20 m/s wind (about 0.6 m/s
+of leeway).
+
+| Run | Lowest battery | Arrival vs deadline | 1 h error | 3 h error (stays the same) | Drift estimate error |
+| --- | --- | --- | --- | --- | --- |
+| transit, seed 1 | 62.5 % | +16 min | 3.63 | 4.23 (5.33) | 0.32 m/s |
+| transit, seed 2 | 62.8 % | +16 min | 2.09 | 1.01 (1.90) | 0.31 m/s |
+| transit, seed 3 | 66.7 % | not by the end (3.3 h) | 1.16 | 0.57 (1.66) | 0.14 m/s |
+| transit from 47 % | 40.4 % | +21 min | 3.88 | 3.82 (4.66) | 0.28 m/s |
+| transit at night, from 60 % | 50.5 % | not by the end | 1.77 | 0.63 (6.88) | 0.21 m/s |
+| transit, no deadline | 68.0 % | not by the end | 2.87 | 2.08 (0.32) | 0.21 m/s |
+| station, from 60 % | 58.1 % | – | 0.57 | 0.47 (2.34) | 0.20 m/s |
+| storm transit | 51.0 % | +6 min | 8.01 | 11.65 (12.47) | 0.38 m/s |
+| storm station, from 50 % | 40.8 % | – | 4.14 | 7.18 (4.62) | 0.61 m/s |
+| storm transit from 47 %, 3.5 h deadline | 31.1 % | not by the end | 3.11 | 2.81 (2.67) | 0.35 m/s |
+
+No run went below its reserve (30 %, station 35 %). The storm station run
+held station to 40.2 % (reserve plus margin), then drifted with Starlink at
+minimal duty. The storm transit from 47 % was energy-limited and did what it
+should: Starlink to minimal duty, then paused to recharge when no speed kept
+the forecast above reserve plus margin (35 %). Every other late or missing
+arrival had energy to spare: those were the planner's speed choices, not the
+battery.
+
+**What the runs found, and the fixes** (each with a regression test named
+after the run):
+1. **Wrongly learnt top speeds** (0.34–0.54 m/s against a model top of
+   0.85). The averaging window reached back over the start (boat at rest,
+   disarmed) and over turns; it now starts at the last change of action,
+   leg or autopilot mode, plus 2 minutes to settle. And SITL often made
+   0.1 m/s less than a low command at part throttle (15 % of 0–20 W
+   windows), each time pulling the cap towards a speed read low from a few
+   watts. The limit is now learnt only with the throttle saturated
+   (VFR_HUD).
+2. **The current's sign flipped after a turn,** from a window mixing two legs
+   (same fix).
+3. **Short windows were all Starlink-on** at the start of an hour, reading
+   16 W of Starlink as propulsion. When the service switches Starlink (a
+   relay) it now subtracts it sample by sample on its own schedule.
+4. **The current was never estimated at the station.** The service holds
+   station in AUTO (the mission ends in LOITER_UNLIM) but only trusted
+   observations in LOITER, so it priced holding against still water.
+5. **Going as fast as is safe, it commanded the lowest of the speeds that
+   come to the same thing at the hull's limit,** and the reason said the
+   deadline "can't be met without going below 30 %" when the hull, not
+   energy, was the limit. It now commands the highest, and says so.
+
+**Rerun with the fixes** (transit, seed 1, `runs/validate-20261128/`): 1-hour
+error 3.63 → 1.98, 3-hour 4.23 → 2.79 (stays the same: 3.72), drift estimate
+error 0.32 → 0.18 m/s. No top speed was learnt down; once on the leg against
+the current it learnt 1.0 m/s, up from the measured speed through the water
+(SITL's hull is faster than Scout's). It still arrived 16 minutes late: the
+deadline needs 0.62 m/s over ground on average, about what SITL's hull holds
+whatever the command (below).
+
+**What SITL can't tell us.** A follow-up experiment drove SITL's hull directly
+in MANUAL (`scripts/sitl-hull.py`; `runs/sitl-hull-20261128/`):
+
+| VFR_HUD throttle | 4 % | 14 % | 36 % | 57 % | 78 % | 100 % |
+| --- | --- | --- | --- | --- | --- | --- |
+| Speed in still water (m/s) | 1.83 | 3.53 | 5.90 | 7.50 | 8.77 | 9.84 |
+
+That matches ArduPilot 4.0's model: 0.1 N per µs of PWM above 1500 against
+about 0.5 v² of drag. Scout's whole range (up to 0.85 m/s) is under 1 %, a few
+µs of PWM, so SITL holds a speed only in coarse steps (about 0.45, 0.63, 0.77,
+0.89 m/s). Across the batch, commands from 0.3 to 1.2 m/s all gave 0.6–0.74 m/s
+over ground. And it has no hull limit: into the storm it made 1.3 m/s through
+the water, which the power model priced at 270 W against Scout's 73 W
+maximum. That's where the large storm-transit forecast errors come from.
+The tide itself is applied in full to a motoring hull (±0.50 m/s along the
+heading, 0.50 across it). A stopped hull drifts only partly (0.32 m/s at zero
+throttle and 0.19 m/s in HOLD for a 0.5 m/s tide), so "drift" in SITL isn't free drift. SITL tests
+the MAVLink side: missions, modes, recovery and the current estimate's
+plumbing. Energy and decision quality come from `scout-sim fast`, where
+power and kinematics agree by construction. The SITL `CRUISE_THROTTLE` was
+also inconsistent with this hull (5 % at 0.6 m/s, about 2 m/s); it's now
+1 % at 0.9 m/s, the measured pair.
 
 ## Storms
 
 `scout-sim fast --mission station --storm 24:72`: five days on station with an
 Atlantic low from day 2 to day 4. Solar falls to 8 % of clear sky. Wind rises to
 20 m/s, which adds about 0.6 m/s of leeway drift on top of the current. A calm
-five days from 70 % never goes below 68.7 %.
+five days from 70 % never goes below 67.3 %.
 
 | Planner | Start 70 %: low / hours below reserve | Start 55 % | Start 40 % | 12 h bias |
 | --- | --- | --- | --- | --- |
 | Before | 0 % / 74 h | 0 % / 81 h | – | +10.6 |
 | Floor bug, drift and Starlink fixed | 27.8 % / 4.5 h | 21.0 % / 27 h | 16.8 % / 36 h | +3.0 |
-| + 48 h look-ahead, bad weather persists 96 h, current relaxes | **31.2 % / 0 h** | 23.4 % / 14 h | 13.9 % / 42 h | +4.1 |
+| + 48 h look-ahead, bad weather persists 96 h, current relaxes | 31.2 % / 0 h | 23.4 % / 14 h | 13.9 % / 42 h | +4.1 |
+| + code review (current estimated every boat minute, as on the boat; station priced at the learnt top speed) | 30.5 % / 0 h | 23.3 % / 14 h | 14.0 % / 41 h | +4.1 |
+| + refitted model (`20261127T233027Z`) | 30.7 % / 0 h | 23.8 % / 14 h | 12.4 % / 47 h | +3.5 |
+| + overnight SITL fixes (top speed at full throttle, highest equivalent command) | **32.4 % / 0 h** | 23.8 % / 14.5 h | 12.8 % / 45.5 h | +3.5 |
 
 The reserve is 30 %. What went wrong first:
 1. **The battery floor didn't stop the motors.** This was the safety bug above.
@@ -288,15 +393,17 @@ battery has above the reserve.
 
 ## Open issues
 
-1. **The autopilot doesn't always hold the commanded speed.** In the 5 × SITL run
-   above, ArduPilot accepted `DO_CHANGE_SPEED` / `WP_SPEED` of 0.3–0.4 m/s but made
-   0.7–0.8 m/s over ground, at 100–155 W. That's either SITL's `sailboat-motor`
-   tuning or something about these legs across the current. The planner assumes
-   ground speed = command.
-   - **Next:** check the speed controller and `CRUISE_SPEED` / `CRUISE_THROTTLE`
-     in SITL. Then learn achieved against commanded ground speed (and power)
-     from telemetry, as the top speed already is, and price with what the boat
-     actually does.
+1. **The autopilot doesn't always hold the commanded speed** in SITL:
+   explained by SITL's hull (see [Overnight SITL
+   batch](#overnight-sitl-batch-2026-11-28)), whose motor covers Scout's speed
+   range in a few µs of PWM. On the real boat, whether ArduPilot holds a low
+   command is still unknown: the telemetry has no commanded speed. The service
+   prices legs with the speed through the water it measures, and the top
+   speed it learns, so it copes with a boat that doesn't, but doesn't plan for
+   it.
+   - **Next:** a SITL hull closer to Scout (a newer ArduPilot with the JSON
+     backend, so scout-sim supplies the physics), or log commanded against
+     achieved speed on the boat.
 2. **State of charge.** Capacity is in Wh per 100 points of a voltage reading.
    Calibrating it needs a coulomb-counted charge–discharge cycle and the battery
    chemistry. If the battery is LiFePO4, voltage barely moves across most of its

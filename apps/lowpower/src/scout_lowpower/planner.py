@@ -37,12 +37,12 @@ Safety rules that bypass everything else:
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
 
-import math
-
 from scout_forecast import energy as E
+from scout_forecast.clock import parse_iso
 
 from . import current as C
 from .mission import Mission, distance_m, legs, remaining_m
@@ -65,9 +65,8 @@ class Config:
     min_dwell_s: float = 900.0
     station_hold_w: float = 5.0  # minimum station-keeping propulsion, W
     min_progress_ms: float = 0.05  # less over ground than this is no headway
-    stem_hours: float = (
-        6.0  # no headway: price motoring into it this long (a tide turns)
-    )
+    # No headway: price motoring into it this long (a tide turns).
+    stem_hours: float = 6.0
     # Bad weather persists: with the recent cloud factor below the long-run
     # average, plan as if it relaxes back over this long, not cloud_tau_h.
     bad_weather_tau_h: float = 96.0
@@ -95,9 +94,8 @@ class BoatState:
     # Top speed through the water seen in practice (current.learn_top_speed);
     # None until learnt. The planner uses the lower of this and the model's.
     stw_max_ms: float | None = None
-    at_final: bool = (
-        False  # the autopilot is on the loiter item after the last waypoint
-    )
+    # The autopilot is on the loiter item after the last waypoint.
+    at_final: bool = False
 
 
 @dataclass
@@ -105,7 +103,6 @@ class Plan:
     action: str  # "transit", "pause", "hold" or "drift"
     speed_ms: float | None
     starlink_duty: float
-    returning: bool  # always False now (drift is motors off); kept for state files
     feasible: bool
     min_pct: float
     end_pct: float
@@ -125,12 +122,10 @@ class Plan:
 
     @classmethod
     def from_dict(cls, d: dict) -> Plan:
-        from .mission import parse_time
-
         d = dict(d)
-        d["eta"] = parse_time(d["eta"]) if d.get("eta") else None
-        d["decided_at"] = parse_time(d["decided_at"])
-        d["since"] = parse_time(d["since"]) if d.get("since") else None
+        d["eta"] = parse_iso(d["eta"]) if d.get("eta") else None
+        d["decided_at"] = parse_iso(d["decided_at"])
+        d["since"] = parse_iso(d["since"]) if d.get("since") else None
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
     def same_control(self, other: Plan | None) -> bool:
@@ -141,7 +136,6 @@ class Plan:
             and other.action == self.action
             and other.speed_ms == self.speed_ms
             and other.starlink_duty == self.starlink_duty
-            and other.returning == self.returning
         )
 
 
@@ -188,8 +182,8 @@ def decide(
         )
         if m.kind == "station" or arrived:
             opt = _station_option(s, m, p, cfg, "drift", cfg.starlink_duty_min)
-            return _plan(opt, s, m, reserve_line, reasons, prev, cfg)
-        opt = _pause_option(s, m, p, cfg, cfg.starlink_duty_min)
+        else:
+            opt = _pause_option(s, m, p, cfg, cfg.starlink_duty_min)
         return _plan(opt, s, m, reserve_line, reasons, prev, cfg)
 
     if m.kind == "station" or arrived:
@@ -214,9 +208,8 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
             f"(top speed through the water {stw_max:.2f} m/s)"
         )
     for duty in (cfg.starlink_duty_normal, cfg.starlink_duty_min):
-        opts = _distinct(
-            [_transit_option(s, m, p, cfg, v, duty, route) for v in cfg.speeds_ms]
-        )
+        every = [_transit_option(s, m, p, cfg, v, duty, route) for v in cfg.speeds_ms]
+        opts = _distinct(every)
         moving = [o for o in opts if math.isfinite(o.hours_to_go)]
         if not moving:
             # No speed makes headway. Motoring flat out loses the least ground
@@ -253,7 +246,7 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
             else:
                 comfy = [o for o in on_time if o.min_pct >= line + cfg.comfort_pct]
                 if comfy:
-                    best = max(comfy, key=lambda o: o.speed)
+                    best = _top_command(max(comfy, key=lambda o: o.speed), every)
                     why = (
                         f"no deadline and energy to spare: fastest speed "
                         f"({best.speed:.1f} m/s) keeping the low point at "
@@ -266,7 +259,7 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
                         for o in on_time
                         if o.min_pct >= top - cfg.economy_tolerance_pct
                     ]
-                    best = max(near, key=lambda o: o.speed)
+                    best = _top_command(max(near, key=lambda o: o.speed), every)
                     why = (
                         f"energy is tight: fastest speed within "
                         f"{cfg.economy_tolerance_pct:.0f} points of the most "
@@ -275,22 +268,25 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
                     )
             best = _hysteresis(best, opts, prev, s, cfg, line, deadline_h, reasons)
             reasons.append(why)
-            if duty == cfg.starlink_duty_min:
-                reasons.append(
-                    "Starlink reduced to minimal duty: normal duty isn't feasible"
-                )
+            _note_min_duty(reasons, duty, cfg)
             return _plan(best, s, m, line, reasons, prev, cfg)
         if feasible:  # can't make the deadline without breaching the reserve
-            best = max(feasible, key=lambda o: o.speed)
+            best = _top_command(max(feasible, key=lambda o: o.speed), every)
+            if deadline_h <= 0:
+                why = f"the deadline passed {max(0.0, -deadline_h):.1f} h ago"
+            elif not any(o.hours_to_go <= deadline_h for o in opts):
+                # Energy isn't the limit: no speed gets there in time.
+                why = (
+                    f"no speed arrives in time, at the hull's top speed through "
+                    f"the water ({stw_max:.2f} m/s)"
+                )
+            else:
+                why = f"deadline can't be met without going below {line:.0f}%"
             reasons.append(
-                f"deadline can't be met without going below {line:.0f}%: "
-                f"fastest safe speed {best.speed:.1f} m/s arrives "
+                f"{why}: fastest safe speed {best.speed:.1f} m/s arrives "
                 f"{best.hours_to_go - deadline_h:.1f} h late"
             )
-            if duty == cfg.starlink_duty_min:
-                reasons.append(
-                    "Starlink reduced to minimal duty: normal duty isn't feasible"
-                )
+            _note_min_duty(reasons, duty, cfg)
             return _plan(best, s, m, line, reasons, prev, cfg)
     opt = _pause_option(s, m, p, cfg, cfg.starlink_duty_min)
     reasons.append(
@@ -322,11 +318,20 @@ def _hysteresis(best, opts, prev, s, cfg, line, deadline_h, reasons):
 def _transit_option(s, m, p, cfg, v, duty, route) -> _Option:
     """Command `v` over ground along `route` (legs): time and load per leg."""
     stw_max = _stw_max(s, p)
-    base = E.load_component(p, "hotel_w") + E.load_component(p, "starlink_w") * duty
+    base = E.base_load_w(p, duty)
     segments, hours = [], 0.0  # (end hour, load W)
     for length, unit in route:
-        cur = _current_at(s, hours + 0.5 * length / max(v, 0.1) / 3600, cfg)
-        sog, stw = C.along_leg(v, unit, cur, stw_max)
+        # The current where the boat is mid-leg. That time depends on the
+        # speed it actually makes, which depends on the current: iterate,
+        # from the speed it makes at the leg's start. (Timing it by the
+        # commanded speed made commands beyond reach look slower.)
+        sog, stw = C.along_leg(v, unit, _current_at(s, hours, cfg), stw_max)
+        for _ in range(20):
+            mid = hours + 0.5 * length / max(sog, cfg.min_progress_ms) / 3600
+            was = sog
+            sog, stw = C.along_leg(v, unit, _current_at(s, mid, cfg), stw_max)
+            if abs(sog - was) < 1e-9:
+                break
         if sog < cfg.min_progress_ms:
             hours = math.inf
             break
@@ -342,7 +347,7 @@ def _transit_option(s, m, p, cfg, v, duty, route) -> _Option:
         for end, w in segments:
             if h < end:
                 return w
-        return base + _station_w(p, cfg, _current_at(s, h, cfg))
+        return base + _station_w(p, cfg, _current_at(s, h, cfg), stw_max)
 
     sim = _project(s, p, load, horizon, cfg)
     return _Option("transit", v, duty, hours, min(sim["pct"]), sim["pct"][-1], sim)
@@ -374,8 +379,26 @@ def _distinct(opts):
     return out
 
 
+def _top_command(best, every):
+    """When going as fast as is safe: of the commands the model can't tell
+    apart from `best` (beyond the hull's believed top speed they all give
+    the same), the highest. If the belief is right ArduPilot saturates and
+    nothing changes; if it's too low, the boat goes faster, and the service
+    sees it and raises the belief. Commanding the lowest of them (overnight
+    SITL run transit-s3, 0.5 m/s against a learnt 0.54 m/s top speed) never
+    finds out."""
+    same = [
+        o
+        for o in every
+        if math.isfinite(o.hours_to_go)
+        and abs(o.hours_to_go - best.hours_to_go) < 1e-6
+        and abs(o.min_pct - best.min_pct) < 1e-6
+    ]
+    return max(same + [best], key=lambda o: o.speed)
+
+
 def _pause_option(s, m, p, cfg, duty) -> _Option:
-    base = E.load_component(p, "hotel_w") + E.load_component(p, "starlink_w") * duty
+    base = E.base_load_w(p, duty)
     sim = _project(s, p, lambda k, t: base, cfg.horizon_h, cfg)
     return _Option("pause", None, duty, None, min(sim["pct"]), sim["pct"][-1], sim)
 
@@ -397,10 +420,7 @@ def _decide_station(s, m, p, cfg, prev, line, reasons) -> Plan:
                         f"motors off until holding is affordable again "
                         f"(low point {opt.min_pct:.0f}%)"
                     )
-                if duty == cfg.starlink_duty_min:
-                    reasons.append(
-                        "Starlink reduced to minimal duty: normal duty isn't feasible"
-                    )
+                _note_min_duty(reasons, duty, cfg)
                 return _plan(opt, s, m, line, reasons, prev, cfg)
     opt = _station_option(s, m, p, cfg, "drift", cfg.starlink_duty_min)
     reasons.append(
@@ -410,20 +430,23 @@ def _decide_station(s, m, p, cfg, prev, line, reasons) -> Plan:
     return _plan(opt, s, m, line, reasons, prev, cfg)
 
 
-def _station_w(p, cfg, current=(0.0, 0.0)) -> float:
+def _station_w(p, cfg, current, stw_max) -> float:
     """Station-keeping propulsion: at least the observed MODE_17 draw, and
     enough to stem the current (capped at the hull's top speed)."""
-    stem = E.propulsion_w(p, min(math.hypot(*current), E.max_stw_ms(p)))
+    stem = E.propulsion_w(p, min(math.hypot(*current), stw_max))
     return max(E.load_component(p, "mode17_propulsion_w"), cfg.station_hold_w, stem)
 
 
 def _station_option(s, m, p, cfg, action, duty) -> _Option:
-    base = E.load_component(p, "hotel_w") + E.load_component(p, "starlink_w") * duty
+    base = E.base_load_w(p, duty)
+
+    stw_max = _stw_max(s, p)
 
     def load(k, t):
         if action == "drift":  # motors off
             return base
-        return base + _station_w(p, cfg, _current_at(s, (k + 0.5) * E.STEP_H, cfg))
+        h = (k + 0.5) * E.STEP_H
+        return base + _station_w(p, cfg, _current_at(s, h, cfg), stw_max)
 
     horizon = cfg.horizon_h
     if m.hold_until is not None:
@@ -435,8 +458,12 @@ def _station_option(s, m, p, cfg, action, duty) -> _Option:
 
 
 # ------------------------------------------------------------------ helpers
-def _project(s, p, load_fn, hours, cfg: Config | None = None) -> dict:
-    cfg = cfg or Config()
+def _note_min_duty(reasons, duty, cfg) -> None:
+    if duty == cfg.starlink_duty_min:
+        reasons.append("Starlink reduced to minimal duty: normal duty isn't feasible")
+
+
+def _project(s, p, load_fn, hours, cfg: Config) -> dict:
     if s.cloud is not None and s.cloud < p.cloud_default:
         p = replace(p, cloud_tau_h=max(p.cloud_tau_h, cfg.bad_weather_tau_h))
     return E.project(
@@ -454,8 +481,6 @@ def _project(s, p, load_fn, hours, cfg: Config | None = None) -> dict:
 
 
 def _plan(opt: _Option, s, m, line, reasons, prev, cfg) -> Plan:
-    # Drifting is motors off; holding (LOITER at the station) brings it back.
-    returning = False
     eta = (
         s.time + timedelta(hours=opt.hours_to_go)
         if opt.hours_to_go is not None and math.isfinite(opt.hours_to_go)
@@ -471,7 +496,6 @@ def _plan(opt: _Option, s, m, line, reasons, prev, cfg) -> Plan:
         action=opt.action,
         speed_ms=opt.speed,
         starlink_duty=opt.duty,
-        returning=returning,
         feasible=opt.min_pct >= line,
         min_pct=round(opt.min_pct, 2),
         end_pct=round(opt.end_pct, 2),

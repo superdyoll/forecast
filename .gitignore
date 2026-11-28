@@ -11,3 +11,4 @@ dist/
 sim-run/
 lowpower-state/
 .claude/settings.local.json
+.coverage

@@ -8,9 +8,12 @@ SAIL_ENABLE 0
 ARMING_CHECK 0
 FS_THR_ENABLE 0
 FS_GCS_ENABLE 0
-# Slow boat: cruise speed and throttle feed-forward for the SITL hull model.
-CRUISE_SPEED 0.6
-CRUISE_THROTTLE 5
+# Cruise speed and throttle feed-forward for the SITL hull model. Its motor
+# gives 0.1 N per us of PWM above 1500 against ~0.5 v^2 of drag: ~0.93 m/s at
+# 1 % throttle, 1.8 m/s at 4 % (measured in still water). Scout's whole speed
+# range is under 1 % (a few us of PWM), so SITL holds it only coarsely.
+CRUISE_SPEED 0.9
+CRUISE_THROTTLE 1
 WP_SPEED 0.6
 WP_RADIUS 15
 LOIT_RADIUS 50

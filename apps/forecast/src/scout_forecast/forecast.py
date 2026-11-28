@@ -18,22 +18,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
-from .env import csv_arg
-
+from . import clock
 from . import energy as E
-
-
-def parse_when(s: str) -> datetime:
-    s = s.strip().replace("Z", "+00:00")
-    t = datetime.fromisoformat(s)
-    return (
-        t.replace(tzinfo=timezone.utc)
-        if t.tzinfo is None
-        else t.astimezone(timezone.utc)
-    )
+from .env import csv_arg
 
 
 def hindcast(
@@ -72,7 +62,8 @@ def hindcast(
         ]
         p = E.fit(g, origins, 12 * E.STEPS_PER_H, exclude=[span])
         held = g["times"][max(span[0], 0)]
-        fitted = f"fitted on data outside {held:%m-%d %H:%M}..+{(H + L) / 4:.0f} h"
+        span_h = (H + L) / E.STEPS_PER_H
+        fitted = f"fitted on data outside {held:%m-%d %H:%M}..+{span_h:.0f} h"
 
     sim = E.simulate(g, p, i, H, plan=plan)
     n = len(g["times"])
@@ -134,11 +125,11 @@ def main(argv=None) -> int:
     ap.add_argument("--json", help="also write the full forecast here")
     a = ap.parse_args(argv)
 
-    params = None
-    if a.params:
-        params = E.Params.from_dict(json.loads(Path(a.params).read_text()))
+    params = E.load_params(a.params) if a.params else None
     try:
-        r = hindcast(E.build_grid(a.csv), parse_when(a.start), a.hours, a.plan, params)
+        r = hindcast(
+            E.build_grid(a.csv), clock.parse_iso(a.start), a.hours, a.plan, params
+        )
     except ValueError as e:
         raise SystemExit(str(e))
     p = E.Params.from_dict(r["params"])

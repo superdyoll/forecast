@@ -33,23 +33,24 @@ from __future__ import annotations
 import argparse
 import csv
 import math
-
 import sys
 from collections import Counter
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Iterable
 
 from .env import csv_arg
 
-# ArduPilot Rover mode numbers seen in this file. 17 is not a stock Rover
-# mode; kept as an explicit unknown rather than guessed.
+# ArduPilot Rover mode numbers (also used by scout-lowpower). 17 is not a
+# stock Rover mode; kept as an explicit unknown rather than guessed.
 MODE_NAMES = {
     0: "MANUAL",
+    3: "STEERING",
     4: "HOLD",
     5: "LOITER",
     10: "AUTO",
     11: "RTL",
+    12: "SMART_RTL",
     15: "GUIDED",
     16: "INITIALISING",
     17: "MODE_17",
@@ -73,6 +74,7 @@ FLOAT_COLS = [
     "battery_pct",
 ]
 INT_COLS = ["custom_mode", "custom0_arming", "wp_num"]
+REQUIRED_COLS = ["created_at", "communication_mode"] + FLOAT_COLS + INT_COLS
 
 IMT_BACKLOG_GAP_S = 2.0
 MAX_PLAUSIBLE_SPEED_MS = 5.0
@@ -191,7 +193,7 @@ def _clean(raw: dict) -> dict:
     bus_v = r["thruster_v"] or r["battery_v"]
     r["battery_w"] = _mul(r["battery_v"], r["battery_a"])
     r["thruster_w"] = _mul(bus_v, r["thruster_a"])
-    r["solar_w"] = _mul(r["solar_v"], r["solar_a"])  # panel side, before MPPT
+    r["solar_w"] = _mul(r["solar_v"], r["solar_a"])  # before or after MPPT: unconfirmed
     # Residual: conversion losses + timing mismatch (~2 W on average).
     if None not in (r["solar_w"], r["thruster_w"], r["battery_w"]):
         r["other_w"] = r["solar_w"] - r["thruster_w"] - r["battery_w"]
@@ -207,9 +209,15 @@ def _mul(a, b):
 
 
 def load(path: str | Path, include_globalstar: bool = True) -> list[dict]:
-    """Return cleaned rows sorted by receipt time."""
+    """Return cleaned rows sorted by receipt time. Raises ValueError if the
+    file lacks any of the expected columns (a renamed export would otherwise
+    load as rows of missing values)."""
     with open(path, newline="") as fh:
-        rows = [_clean(raw) for raw in csv.DictReader(fh)]
+        reader = csv.DictReader(fh)
+        missing = [c for c in REQUIRED_COLS if c not in (reader.fieldnames or [])]
+        if missing:
+            raise ValueError(f"{path}: not a Tether export, missing {missing}")
+        rows = [_clean(raw) for raw in reader]
     rows.sort(key=lambda r: r["time"])
 
     # Flag imt backlog flushes.
@@ -325,6 +333,8 @@ def _fmt(v):
 
 
 def summary(rows: list[dict]) -> str:
+    if not rows:
+        return "rows: 0"
     lines = [
         f"rows: {len(rows)}",
         f"span: {rows[0]['time']:%Y-%m-%d %H:%M} -> "
@@ -383,7 +393,10 @@ def main(argv=None) -> int:
     p.add_argument("--summary", action="store_true", help="print a summary")
     a = p.parse_args(argv)
 
-    rows = load(a.csv, include_globalstar=not a.no_globalstar)
+    try:
+        rows = load(a.csv, include_globalstar=not a.no_globalstar)
+    except ValueError as e:
+        raise SystemExit(str(e))
     if a.summary or not a.out:
         print(summary(rows))
     if a.out:

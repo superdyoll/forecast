@@ -27,9 +27,72 @@ def from_thrust(p: E.Params, ground, heading_deg: float, propulsion_w: float):
     return ground[0] - stw * math.cos(h), ground[1] - stw * math.sin(h)
 
 
-def from_drift(ground):
-    """Current while drifting with the motors off: the ground velocity."""
-    return ground[0], ground[1]
+def starlink_on(epoch_s: float, duty: float, period_s: float) -> bool:
+    """Starlink's state on the service's relay schedule: on for the first
+    `duty` of every `period_s`, in boat time. The service switches the relay
+    by it, and the simulators' power models follow it."""
+    return (epoch_s % period_s) < duty * period_s
+
+
+def propulsion_w(
+    p: E.Params, loads, duty: float, period_s: float | None
+) -> float | None:
+    """Mean propulsion power over [(boat epoch s, load W), ...]: the load less
+    hotel and Starlink. With `period_s` (the service switches Starlink, so it
+    knows when it was on) Starlink comes off sample by sample; without, at
+    its average duty, which only averages out over a whole cycle."""
+    if not loads:
+        return None
+    hotel, sl = E.load_component(p, "hotel_w"), E.load_component(p, "starlink_w")
+    if period_s is None:
+        return sum(w for _, w in loads) / len(loads) - E.base_load_w(p, duty)
+    on = [starlink_on(t, duty, period_s) for t, _ in loads]
+    return sum(w - hotel - sl * o for (_, w), o in zip(loads, on)) / len(loads)
+
+
+def observe(
+    p: E.Params, action: str, mode_ok: bool, armed: bool, ground, heading_deg, prop_w
+):
+    """One observation of the current from a window of telemetry, or None.
+
+    `mode_ok`: the autopilot is in the mode the plan asks for. Motoring
+    (transit in AUTO, hold in LOITER, armed): from the propulsion power
+    (propulsion_w). Motors off (pause or drift in HOLD, or disarmed): the
+    ground velocity itself.
+    """
+    if action in ("transit", "hold"):
+        if not (mode_ok and armed) or heading_deg is None or prop_w is None:
+            return None
+        return from_thrust(p, ground, heading_deg, prop_w)
+    if action in ("pause", "drift") and (mode_ok or not armed):
+        return tuple(ground)
+    return None
+
+
+SETTLE_S = 120.0  # boat seconds after a change of plan or leg before averaging
+MIN_SPAN_S = 300.0  # the shortest window worth an estimate
+
+
+def window_s(since_change_s: float, full_s: float) -> float | None:
+    """How many boat seconds of telemetry to average, or None for none yet.
+
+    The whole of `full_s` (a Starlink cycle, so its sessions average out),
+    but never reaching back past the last change of action, leg or autopilot
+    mode/arming, less SETTLE_S: a window across a turn mixes two legs'
+    headings and ground velocities, and one across the start mixes in the
+    boat at rest before it was armed.
+    """
+    span = min(full_s, since_change_s - SETTLE_S)
+    return span if span >= MIN_SPAN_S else None
+
+
+def cloud_factor(obs) -> float | None:
+    """Observed / clear-sky solar over [(time, observed W, clear-sky W), ...]
+    (sun up only), or None with fewer than 4 observations."""
+    obs = [o for o in obs if o[2] > 20]
+    if len(obs) < 4:
+        return None
+    return sum(o[1] for o in obs) / sum(o[2] for o in obs)
 
 
 def blend(old, new, weight: float):
@@ -57,16 +120,22 @@ def along_leg(v_cmd: float, unit, current, stw_max: float):
     return sog, stw
 
 
-def learn_top_speed(cap, commanded: float, sog: float, stw: float):
+FULL_THROTTLE_PCT = 90.0  # VFR_HUD throttle (ArduPilot's THR_MAX is 100 %)
+
+
+def learn_top_speed(cap, commanded: float, sog: float, stw: float, throttle_pct):
     """The hull's real top speed through the water, learnt while motoring.
 
-    Making clearly less over ground than commanded means the boat is at its
-    limit: the speed through the water it holds then (from the measured
-    power) is its top speed. Making the commanded speed at a higher water
-    speed than `cap` shows the cap is too low. Otherwise nothing is learnt.
-    `cap` is None until the first observation.
+    At its limit the boat makes clearly less over ground than commanded with
+    the throttle saturated: the speed through the water it holds then (from
+    the measured power) is its top speed. Falling short at part throttle is
+    the speed controller lagging, not a limit (SITL sits ~0.1 m/s under a low
+    command), and low power reads as too low a speed through the water: that
+    teaches nothing. The window must only hold the autopilot doing what the
+    plan asked (window_s). Going faster through the water than `cap` shows
+    the cap is too low. `cap` is None until the first observation.
     """
-    if sog < commanded - 0.1:
+    if sog < commanded - 0.1 and (throttle_pct or 0.0) >= FULL_THROTTLE_PCT:
         return stw if cap is None else cap + 0.3 * (stw - cap)
     if cap is not None and stw > cap:
         return stw

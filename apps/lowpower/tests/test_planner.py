@@ -147,7 +147,9 @@ class Current(unittest.TestCase):
         fast = decide(state(95), m, PARAMS)
         slow_hull = decide(state(95, stw_max_ms=0.3), m, PARAMS)
         self.assertGreater(slow_hull.eta, fast.eta)
-        self.assertLessEqual(slow_hull.speed_ms, 0.3)
+        # Every command from 0.3 up is the same for a 0.3 m/s hull; going
+        # fastest it asks for the most (_top_command) in case 0.3 is too low.
+        self.assertEqual(slow_hull.speed_ms, max(Config().speeds_ms))
 
     def test_strong_tidal_current_keeps_going_because_it_eases(self):
         # Against 1 m/s now (faster than the boat), but a tide with mean ~0:
@@ -180,6 +182,15 @@ class StationDecisions(unittest.TestCase):
         p = decide(state(60), self.station(), PARAMS)
         self.assertEqual(p.action, "hold")
 
+    def test_holding_is_priced_at_the_learnt_top_speed(self):
+        # A 0.8 m/s current, but the hull is known to manage only 0.3 m/s
+        # through the water: holding can't draw more than that speed costs.
+        strong = dict(current_ms=(0.8, 0.0), current_mean_ms=(0.8, 0.0))
+        model = decide(state(80, **strong), self.station(), PARAMS)
+        learnt = decide(state(80, stw_max_ms=0.3, **strong), self.station(), PARAMS)
+        self.assertEqual(model.action, "drift")  # stemming 0.8 m/s: unaffordable
+        self.assertEqual(learnt.action, "hold")  # 0.3 m/s worth: affordable
+
     def test_drifts_with_motors_off_when_holding_is_unaffordable(self):
         # Stemming a 0.8 m/s current takes ~50 W: too much at night with 34 %.
         tight = state(34, t=T0.replace(hour=21), cloud=0.1, current_ms=(0.8, 0.0))
@@ -196,7 +207,7 @@ class StationDecisions(unittest.TestCase):
         )  # ~1.1 km away
         far_plan = decide(far, self.station(), PARAMS)
         self.assertEqual(far_plan.action, "drift")
-        self.assertFalse(far_plan.returning)  # holding again brings it back
+        self.assertIsNone(far_plan.speed_ms)  # motors off; holding again brings it back
 
     def test_below_the_floor_never_motors_back(self):
         far = BoatState(
@@ -204,7 +215,7 @@ class StationDecisions(unittest.TestCase):
         )  # ~1.1 km away, below reserve 30 - floor 3
         p = decide(far, self.station(), PARAMS)
         self.assertEqual(p.action, "drift")
-        self.assertFalse(p.returning)
+        self.assertIsNone(p.speed_ms)  # motors off
 
     def test_nothing_affordable_means_motors_off(self):
         far = BoatState(
@@ -219,7 +230,7 @@ class StationDecisions(unittest.TestCase):
         p = decide(far, self.station(), PARAMS)
         self.assertEqual(p.action, "drift")
         self.assertFalse(p.feasible)
-        self.assertFalse(p.returning)
+        self.assertIsNone(p.speed_ms)  # motors off
 
     def test_no_futile_return_against_a_gale(self):
         far = BoatState(
@@ -233,7 +244,7 @@ class StationDecisions(unittest.TestCase):
         )
         p = decide(far, self.station(), PARAMS)
         self.assertEqual(p.action, "drift")
-        self.assertFalse(p.returning)
+        self.assertIsNone(p.speed_ms)  # motors off
 
     def test_bad_weather_is_assumed_to_persist(self):
         m = self.station()
@@ -284,6 +295,84 @@ class Arrival(unittest.TestCase):
             at_final=True,
         )
         self.assertIn(decide(s, transit(), PARAMS).action, ("hold", "drift"))
+
+
+class PastDeadline(unittest.TestCase):
+    def test_says_the_deadline_passed_and_goes_as_fast_as_is_safe(self):
+        m = transit(arrive_by=T0 - timedelta(hours=1))
+        p = decide(state(60), m, PARAMS)
+        self.assertEqual(p.action, "transit")
+        self.assertIn("the deadline passed 1.0 h ago", " ".join(p.reasons))
+        self.assertNotIn("without going below", " ".join(p.reasons))
+        now = decide(state(60), transit(arrive_by=T0), PARAMS)  # due right now
+        self.assertIn("the deadline passed 0.0 h ago", " ".join(now.reasons))
+        fastest_safe = decide(state(60), transit(), PARAMS, Config(comfort_pct=0))
+        self.assertGreaterEqual(p.speed_ms, fastest_safe.speed_ms)
+
+
+class DeadlineReasons(unittest.TestCase):
+    """Overnight SITL run transit-s1 said "deadline can't be met without going
+    below 35%" with a forecast low of 70 %: the hull, not energy, was the limit."""
+
+    def test_hull_limited(self):
+        m = transit(arrive_by=T0 + timedelta(hours=2))  # 33 km: needs ~4.6 m/s
+        p = decide(state(90), m, PARAMS)
+        text = " ".join(p.reasons)
+        self.assertIn("no speed arrives in time, at the hull's top speed", text)
+        self.assertNotIn("without going below", text)
+
+    def test_energy_limited(self):
+        # 33 km in 14 h needs ~0.7 m/s; at night with 55 % that would breach
+        # the reserve, so it goes at 0.4 m/s and arrives a day late.
+        night = T0.replace(hour=20)
+        m = transit(arrive_by=night + timedelta(hours=14))
+        p = decide(state(55, t=night, cloud=0.1), m, PARAMS)
+        self.assertEqual((p.action, p.speed_ms), ("transit", 0.4))
+        self.assertGreater(p.eta, m.arrive_by)
+        self.assertIn(
+            "deadline can't be met without going below 35%", " ".join(p.reasons)
+        )
+
+
+class TopCommand(unittest.TestCase):
+    """Overnight SITL run transit-s3: with a learnt top speed of 0.54 m/s,
+    every command from 0.5 up looked the same and the planner kept the lowest
+    (0.5), so the boat could never show that it was faster than believed."""
+
+    def test_going_fastest_commands_the_highest_equivalent_speed(self):
+        late = transit(arrive_by=T0 + timedelta(hours=2))  # can't be met
+        p = decide(state(90, stw_max_ms=0.5), late, PARAMS)
+        self.assertEqual(p.action, "transit")
+        self.assertEqual(p.speed_ms, max(Config().speeds_ms))
+        free = decide(state(95, stw_max_ms=0.5), transit(), PARAMS)
+        self.assertEqual(free.speed_ms, max(Config().speeds_ms))
+
+    def test_economy_still_takes_the_lowest(self):
+        # With a deadline it can meet, the slowest command that makes it.
+        m = transit(arrive_by=T0 + timedelta(hours=30))
+        p = decide(state(60, stw_max_ms=0.5), m, PARAMS)
+        self.assertLessEqual(p.speed_ms, 0.5)
+
+
+class Geometry(unittest.TestCase):
+    def test_legs_cross_the_180th_meridian_the_short_way(self):
+        from scout_lowpower.mission import distance_m, legs, unit
+
+        m = Mission(kind="transit", waypoints=[[0.0, -179.99]])
+        ((length, u),) = legs(m, (0.0, 179.99), 0)
+        self.assertAlmostEqual(u[0], 0.0, places=6)
+        self.assertAlmostEqual(u[1], 1.0, places=6)  # east, not round the world west
+        self.assertAlmostEqual(length, distance_m((0.0, 179.99), (0.0, -179.99)))
+        self.assertAlmostEqual(unit((0.0, -179.99), (0.0, 179.99))[0][1], -1.0)
+        self.assertLess(unit((0.0, 179.99), (0.0, -179.99))[1], 2300)  # ~2.2 km
+
+    def test_legs_skip_waypoints_the_boat_is_on(self):
+        from scout_lowpower.mission import legs
+
+        m = Mission(kind="transit", waypoints=[[60.2, 2.2], [60.3, 2.2]])
+        route = legs(m, (60.2, 2.2), 0)
+        self.assertEqual(len(route), 1)
+        self.assertAlmostEqual(route[0][1][0], 1.0)  # due north
 
 
 class StaleIndex(unittest.TestCase):

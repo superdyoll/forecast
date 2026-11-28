@@ -18,15 +18,18 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scout_forecast import energy as E
+from scout_lowpower import current as C
 
 
 @dataclass
 class PowerTruth:
-    capacity_wh: float = 2400.0  # fitted: 2,200
-    sag_pct_per_a: float = 0.9
-    solar_k: float = 250.0  # fitted: ~236
-    solar_gamma: float = 1.5
-    solar_offset_h: float = 0.0
+    # Against the shipped fit (fitted_params.json, run 20261127T233027Z); keep
+    # these offsets if it is refitted.
+    capacity_wh: float = 2500.0  # fitted: 2,300 (+9 %)
+    sag_pct_per_a: float = 0.8  # fitted: 0.8
+    solar_k: float = 380.0  # fitted: ~361 (+5 %)
+    solar_gamma: float = 2.5  # fitted: 2.5
+    solar_offset_h: float = -0.25  # fitted: -0.75 (sun half an hour off)
     hotel_w: float = 11.0  # fitted: 9.9
     starlink_w: float = 22.0
     propulsion_scale: float = 1.1  # x the fitted cubic
@@ -54,15 +57,17 @@ class PowerModel:
         self.pct = pct0
         self.volt = 20 + pct0 / 20
         self.rnd = random.Random(seed)
-        self.last = {}
 
     def starlink_on(self, t: datetime) -> bool:
-        period = self.t.starlink_period_s
-        return (t.timestamp() % period) < self.t.starlink_duty * period
+        # On the service's relay schedule (the service switches Starlink).
+        return C.starlink_on(
+            t.timestamp(), self.t.starlink_duty, self.t.starlink_period_s
+        )
 
     def step(self, t, dt_s, lat, lon, u_water, armed, cloud) -> dict:
         tr = self.t
-        load = tr.hotel_w + (tr.starlink_w if self.starlink_on(t) else 0.0)
+        starlink = self.starlink_on(t)
+        load = tr.hotel_w + (tr.starlink_w if starlink else 0.0)
         prop = 0.0
         if armed:
             prop = tr.esc_idle_w + tr.propulsion_scale * E.propulsion_w(
@@ -76,13 +81,12 @@ class PowerModel:
         )
         v = 20 + self.pct / 20 + self.rnd.gauss(0, tr.volt_noise)
         self.volt = round(v, 2)
-        self.last = {
+        return {
             "load_w": load,
             "prop_w": prop,
             "solar_w": solar,
             "battery_w": net,
             "volt": self.volt,
             "pct": self.pct,
-            "starlink": self.starlink_on(t),
+            "starlink": starlink,
         }
-        return self.last

@@ -3,13 +3,13 @@
 #
 #   scripts/quickstart.sh                  # install into .venv, run the simulation (20x; 5x on arm64)
 #   scripts/quickstart.sh --install-only   # just install (and check the install works)
-#   scripts/quickstart.sh --test           # install, then run every app's unit tests
+#   scripts/quickstart.sh --test           # install, then run every app's and packaging's unit tests
 #   SIM_RATE=1 scripts/quickstart.sh       # real time instead of 20x
 #   SCOUT_WEB_PORT=8090 scripts/quickstart.sh   # if 8080 is taken
 #
 # Running prints one line "READY http://127.0.0.1:8080" once the page is up and
 # the service is planning; then it keeps running (logs follow) until Ctrl-C.
-# The SITL container keeps running after that (docker rm -f scout-sitl).
+# The SITL container may keep running after that (docker rm -f scout-sitl).
 #
 # Needs: Python 3.9+, and docker running (Docker Desktop on macOS/Windows,
 # docker.io on Linux). The first run pulls the ArduPilot SITL image (several
@@ -53,7 +53,7 @@ say "installed: $(.venv/bin/python packaging/version.py) (forecast, scout-lowpow
 
 if [ "$mode" = install ]; then exit 0; fi
 if [ "$mode" = test ]; then
-  for d in apps/*/tests; do
+  for d in apps/*/tests packaging/tests; do
     say "testing $d"
     "$VPY" -m unittest discover -s "$d" || die "tests failed in $d"
   done

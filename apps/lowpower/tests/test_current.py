@@ -47,29 +47,60 @@ class Estimate(unittest.TestCase):
         self.assertAlmostEqual(est[0], truth[0], places=6)
         self.assertAlmostEqual(est[1], truth[1], places=6)
 
-    def test_from_drift_is_the_ground_velocity(self):
-        self.assertEqual(C.from_drift((0.1, -0.2)), (0.1, -0.2))
-
     def test_blend(self):
         self.assertEqual(C.blend((0.0, 0.0), (1.0, 2.0), 0.5), (0.5, 1.0))
 
 
 class TopSpeed(unittest.TestCase):
-    def test_short_of_the_command_means_at_the_limit(self):
-        self.assertAlmostEqual(C.learn_top_speed(None, 1.2, 0.7, 0.3), 0.3)
-        self.assertAlmostEqual(C.learn_top_speed(0.5, 1.2, 0.7, 0.3), 0.44)
+    def test_short_of_the_command_at_full_throttle_means_at_the_limit(self):
+        self.assertAlmostEqual(C.learn_top_speed(None, 1.2, 0.7, 0.3, 100), 0.3)
+        self.assertAlmostEqual(C.learn_top_speed(0.5, 1.2, 0.7, 0.3, 95), 0.44)
+
+    def test_short_at_part_throttle_is_the_controller_lagging(self):
+        # SITL at a low command: 0.1+ m/s short, a few W, an STW read too low.
+        self.assertIsNone(C.learn_top_speed(None, 0.7, 0.55, 0.35, 20))
+        self.assertEqual(C.learn_top_speed(0.9, 0.7, 0.55, 0.35, 20), 0.9)
+        self.assertEqual(C.learn_top_speed(0.9, 0.7, 0.55, 0.35, None), 0.9)
 
     def test_making_the_command_faster_raises_the_cap(self):
-        self.assertEqual(C.learn_top_speed(0.3, 0.6, 0.6, 0.5), 0.5)
+        self.assertEqual(C.learn_top_speed(0.3, 0.6, 0.6, 0.5, 30), 0.5)
 
     def test_otherwise_nothing_learnt(self):
-        self.assertIsNone(C.learn_top_speed(None, 0.6, 0.6, 0.4))
-        self.assertEqual(C.learn_top_speed(0.5, 0.6, 0.6, 0.4), 0.5)
+        self.assertIsNone(C.learn_top_speed(None, 0.6, 0.6, 0.4, 100))
+        self.assertEqual(C.learn_top_speed(0.5, 0.6, 0.6, 0.4, 30), 0.5)
+
+
+class Starlink(unittest.TestCase):
+    def test_schedule(self):
+        on = [C.starlink_on(t, 0.25, 3600) for t in (0, 899, 900, 3599, 3600)]
+        self.assertEqual(on, [True, True, False, False, True])
+        self.assertFalse(C.starlink_on(10, 0.0, 3600))
+
+    def test_propulsion_known_schedule_vs_average_duty(self):
+        hotel, sl = E.load_component(P, "hotel_w"), E.load_component(P, "starlink_w")
+        # 10 min, Starlink on all of it (the start of its hour), 5 W propelling.
+        loads = [(t, hotel + sl + 5.0) for t in range(0, 600, 10)]
+        self.assertAlmostEqual(C.propulsion_w(P, loads, 0.25, 3600), 5.0)
+        # Without the schedule, a quarter of Starlink is assumed: 16.5 W too much.
+        self.assertAlmostEqual(C.propulsion_w(P, loads, 0.25, None), 5.0 + 0.75 * sl)
+        self.assertIsNone(C.propulsion_w(P, [], 0.25, 3600))
+
+
+class Window(unittest.TestCase):
+    def test_a_whole_cycle_when_nothing_changed(self):
+        self.assertEqual(C.window_s(10_000, 3600), 3600)
+
+    def test_never_back_past_a_change_less_the_settling(self):
+        self.assertEqual(C.window_s(1200, 3600), 1200 - C.SETTLE_S)
+
+    def test_none_until_there_is_enough(self):
+        self.assertIsNone(C.window_s(C.SETTLE_S + C.MIN_SPAN_S - 1, 3600))
+        self.assertEqual(C.window_s(C.SETTLE_S + C.MIN_SPAN_S, 3600), C.MIN_SPAN_S)
 
 
 class Model(unittest.TestCase):
     def test_fitted_params_ship_with_the_package(self):
-        self.assertEqual(P.capacity_wh, 2200)
+        self.assertEqual(P.capacity_wh, 2300)  # run 20261127T233027Z
         self.assertAlmostEqual(E.max_stw_ms(P), 0.85, delta=0.02)
         for v in (0.2, 0.5, 0.8):
             self.assertAlmostEqual(E.stw_for_power(P, E.propulsion_w(P, v)), v)

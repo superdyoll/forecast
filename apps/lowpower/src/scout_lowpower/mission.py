@@ -20,8 +20,10 @@ import json
 import math
 import os
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
+
+from scout_forecast.clock import parse_iso
 
 EARTH_R = 6371000.0
 
@@ -53,12 +55,6 @@ class Mission:
         if self.drift_radius_m < self.radius_m:
             raise ValueError("drift_radius_m must be >= radius_m")
 
-    @property
-    def goal(self) -> tuple[float, float]:
-        return (
-            tuple(self.station) if self.kind == "station" else tuple(self.waypoints[-1])
-        )
-
     def to_dict(self) -> dict:
         d = asdict(self)
         for k in ("arrive_by", "hold_until"):
@@ -75,7 +71,7 @@ class Mission:
         d = dict(d)
         for k in ("arrive_by", "hold_until"):
             if d.get(k):
-                d[k] = parse_time(d[k])
+                d[k] = parse_iso(d[k])
         d["waypoints"] = [list(map(float, w)) for w in d.get("waypoints", [])]
         if d.get("station"):
             d["station"] = list(map(float, d["station"]))
@@ -84,15 +80,6 @@ class Mission:
         if unknown:
             raise ValueError(f"unknown mission fields: {sorted(unknown)}")
         return cls(**d)
-
-
-def parse_time(s: str) -> datetime:
-    t = datetime.fromisoformat(s.strip().replace("Z", "+00:00"))
-    return (
-        t.replace(tzinfo=timezone.utc)
-        if t.tzinfo is None
-        else t.astimezone(timezone.utc)
-    )
 
 
 def load(path: str | Path) -> Mission:
@@ -137,6 +124,16 @@ def remaining_m(m: Mission, pos, next_wp: int) -> float:
     return d
 
 
+def unit(a, b):
+    """(unit north, unit east) from a to b, and the flat-earth length in m.
+    The short way round: across the 180th meridian, not the long way."""
+    dlon = (b[1] - a[1] + 180.0) % 360.0 - 180.0
+    n = math.radians(b[0] - a[0]) * EARTH_R
+    e = math.radians(dlon) * EARTH_R * math.cos(math.radians(a[0]))
+    norm = math.hypot(n, e)
+    return ((n / norm, e / norm) if norm > 0 else (0.0, 0.0)), norm
+
+
 def legs(m: Mission, pos, next_wp: int) -> list:
     """The route still to go as [(length m, (unit north, unit east)), ...]:
     from `pos` to waypoint `next_wp`, then along the rest. Directions use a
@@ -144,9 +141,7 @@ def legs(m: Mission, pos, next_wp: int) -> list:
     pts = [pos] + list(m.waypoints[min(max(next_wp, 0), len(m.waypoints) - 1) :])
     out = []
     for a, b in zip(pts, pts[1:]):
-        n = math.radians(b[0] - a[0]) * EARTH_R
-        e = math.radians(b[1] - a[1]) * EARTH_R * math.cos(math.radians(a[0]))
-        norm = math.hypot(n, e)
+        u, norm = unit(a, b)
         if norm > 0.5:
-            out.append((distance_m(a, b), (n / norm, e / norm)))
+            out.append((distance_m(a, b), u))
     return out

@@ -14,11 +14,13 @@ class DotenvTest(unittest.TestCase):
     def setUp(self):
         self.saved = dict(os.environ)
         self.saved_dir, self.saved_keys = env._dotenv_dir, set(env._dotenv_keys)
+        self.saved_searched = env._searched
 
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self.saved)
         env._dotenv_dir, env._dotenv_keys = self.saved_dir, self.saved_keys
+        env._searched = self.saved_searched
 
     def _dotenv(self, text):
         d = tempfile.mkdtemp()

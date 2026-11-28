@@ -25,26 +25,52 @@ def make(start: datetime, rate: float = 1.0, real: float | None = None) -> str:
     return f"{start.astimezone(timezone.utc).isoformat()}@{real:.3f}x{rate:g}"
 
 
-def parse(spec: str):
-    sim, _, rest = spec.partition("@")
-    real, _, rate = rest.partition("x")
-    t = datetime.fromisoformat(sim.replace("Z", "+00:00"))
+def parse_iso(s: str) -> datetime:
+    """ISO 8601, 'Z' allowed; naive times are UTC. Always returns UTC."""
+    t = datetime.fromisoformat(s.strip().replace("Z", "+00:00"))
     if t.tzinfo is None:
-        t = t.replace(tzinfo=timezone.utc)
-    return t, float(real), float(rate or 1.0)
+        return t.replace(tzinfo=timezone.utc)
+    return t.astimezone(timezone.utc)
 
 
-def now() -> datetime:
+def parse(spec: str):
+    """(simulated start, real unix time, rate) from 'ISO@UNIXxRATE'.
+    Raises ValueError for anything else, or a rate that isn't positive."""
+    sim, at, rest = spec.partition("@")
+    real, _, rate = rest.partition("x")
+    try:
+        if not at:
+            raise ValueError("no '@'")
+        t, r = parse_iso(sim), float(rate or 1.0)
+        if not r > 0:
+            raise ValueError(f"rate must be positive, not {rate}")
+        return t, float(real), r
+    except ValueError as e:
+        raise ValueError(
+            f"bad ${ENV} {spec!r} ({e}); expected e.g. "
+            f"2025-07-23T06:00:00+00:00@1764190000.0x20 (scout-sim clock prints one)"
+        ) from None
+
+
+def _current():
+    """The parsed $SCOUT_CLOCK (cached while it doesn't change), or None."""
     global _spec
     raw = os.environ.get(ENV)
     if not raw:
-        return datetime.now(timezone.utc)
+        return None
     if _spec is None or _spec[0] != raw:
         _spec = (raw, parse(raw))
-    sim0, real0, rate = _spec[1]
-    return sim0 + timedelta(seconds=(time.time() - real0) * rate)
+    return _spec[1]
+
+
+def now() -> datetime:
+    c = _current()
+    if c is None:
+        return datetime.now(timezone.utc)
+    sim0, real0, r = c
+    return sim0 + timedelta(seconds=(time.time() - real0) * r)
 
 
 def rate() -> float:
-    raw = os.environ.get(ENV)
-    return parse(raw)[2] if raw else 1.0
+    c = _current()
+    return c[2] if c else 1.0

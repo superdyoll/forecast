@@ -1,12 +1,12 @@
 {
-  "_source": "scout-evaluate run 20261126T194630Z: the physical model fitted on all 17 days of scout_telemetry_2025-07 (see REPORT.md). Replace with a newer fit by pointing SCOUT_PARAMS (or --params) at another params.json.",
-  "solar_k": 235.55264100527717,
-  "solar_gamma": 1.5,
-  "solar_offset_h": -0.5,
-  "cloud_default": 0.6263092954297772,
+  "_source": "scout-evaluate run 20261127T233027Z: the physical model fitted on all 17 days of scout_telemetry_2025-07 (see REPORT.md). Replace with a newer fit by pointing SCOUT_PARAMS (or --params) at another params.json.",
+  "solar_k": 360.8787916844939,
+  "solar_gamma": 2.5,
+  "solar_offset_h": -0.75,
+  "cloud_default": 0.622665526786203,
   "cloud_tau_h": 12.0,
-  "capacity_wh": 2200,
-  "sag_pct_per_a": 0.8999999999999999,
+  "capacity_wh": 2300,
+  "sag_pct_per_a": 0.8,
   "loss_w": 2.048568725916917,
   "persist_hours": 6.0,
   "load": {
@@ -53,6 +53,7 @@
         72.6,
         22
       ]
-    ]
+    ],
+    "auto_sog_median": 0.8
   }
 }

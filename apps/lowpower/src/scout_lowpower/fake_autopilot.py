@@ -1,4 +1,7 @@
 """A fake ArduPilot Rover for testing the low-power service without SITL.
+Test support only (the tests of scout-lowpower and scout-sim, and the deb
+smoke test as `python3 -m scout_lowpower.fake_autopilot`); never used by the
+service itself.
 
 Serves MAVLink on TCP (as SITL does on 5760), streams heartbeat, position
 and battery telemetry, and implements the mission upload/download protocol,
@@ -13,18 +16,28 @@ import socket
 import threading
 import time
 
-from scout_lowpower import mavlink as M
+from . import mavlink as M
 
 
 class FakeRover:
     def __init__(
-        self, port: int = 0, lat=60.20, lon=2.20, volt=23.0, position_delay_s=0.0
+        self,
+        port: int = 0,
+        lat=60.20,
+        lon=2.20,
+        volt=23.0,
+        position_delay_s=0.0,
+        reject_uploads=0,
+        legacy_requests=False,
     ):
         self.lat, self.lon, self.volt = lat, lon, volt
         # Seconds after boot before position (with its boot clock) streams: a
         # real autopilot's heartbeat and position are separate streams, so the
         # service can see the heartbeat of a rebooted autopilot first.
         self.position_delay_s = position_delay_s
+        self.reject_uploads = reject_uploads  # refuse this many MISSION_COUNTs
+        # Ask for items with MISSION_REQUEST (older firmware), not _INT.
+        self.legacy_requests = legacy_requests
         self.mode, self.armed = 0, False
         self.mission = []  # (command, lat, lon, param3)
         self.params = {}
@@ -145,6 +158,10 @@ class FakeRover:
         )
         self.send("MISSION_CURRENT", seq=self.seq)
 
+    def _request(self, seq):
+        name = "MISSION_REQUEST" if self.legacy_requests else "MISSION_REQUEST_INT"
+        self.send(name, seq=seq, target_system=255, target_component=191)
+
     def _handle(self, m):
         n = m["name"]
         if n == "COMMAND_LONG":
@@ -166,10 +183,14 @@ class FakeRover:
                 param_count=1,
             )
         elif n == "MISSION_COUNT":
+            if self.reject_uploads > 0:
+                self.reject_uploads -= 1
+                self.send(
+                    "MISSION_ACK", type=1, target_system=255, target_component=191
+                )
+                return
             self._upload = (m["count"], [])
-            self.send(
-                "MISSION_REQUEST_INT", seq=0, target_system=255, target_component=191
-            )
+            self._request(0)
         elif n == "MISSION_ITEM_INT" and self._upload:
             if m["frame"] not in (0, 3):  # like ArduPilot 4.0: no *_INT frames
                 self._upload = None
@@ -181,12 +202,7 @@ class FakeRover:
             if m["seq"] == len(items):
                 items.append((m["command"], m["x"] / 1e7, m["y"] / 1e7, m["param3"]))
             if len(items) < count:
-                self.send(
-                    "MISSION_REQUEST_INT",
-                    seq=len(items),
-                    target_system=255,
-                    target_component=191,
-                )
+                self._request(len(items))
             else:
                 self.mission = items
                 self._upload = None
@@ -219,7 +235,7 @@ class FakeRover:
 
 
 if __name__ == "__main__":
-    # Standalone, for the package smoke test: fake_autopilot.py [PORT [VOLTS]]
+    # For the deb smoke test: python3 -m scout_lowpower.fake_autopilot [PORT [VOLTS]]
     import sys
 
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5760
