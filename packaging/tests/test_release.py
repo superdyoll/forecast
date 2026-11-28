@@ -249,7 +249,8 @@ class SitlContainer(unittest.TestCase):
     def test_no_emulation_stops_with_what_to_install(self):
         r, calls = self.run_script("aarch64")
         self.assertEqual(r.returncode, 78)
-        self.assertIn("sudo apt install qemu-user-static", r.stderr)
+        self.assertIn("sudo apt install qemu-user-binfmt", r.stderr)
+        self.assertIn("sudo apt install qemu-user-static", r.stderr)  # older releases
         self.assertNotIn("--name scout-sitl", calls)  # SITL never started
 
     def test_with_emulation_sitl_starts(self):
@@ -272,8 +273,12 @@ class SitlContainer(unittest.TestCase):
         unit = (PACKAGING / "systemd/scout-sitl.service").read_text()
         self.assertIn("RestartPreventExitStatus=78", unit)
         b = load(PACKAGING / "deb/build_debs.py", "build_debs_sitl")
-        self.assertIn(
-            "qemu-user-static", " ".join(b.PACKAGES["scout-sim"]["recommends"])
+        # qemu 10+ (Debian 13, Ubuntu 25.10+): qemu-user-static is only a
+        # virtual name ("no installation candidate"); before 10, the dynamic
+        # qemu-user-binfmt can't run inside docker.
+        self.assertEqual(
+            b.PACKAGES["scout-sim"]["recommends"],
+            ["qemu-user-binfmt (>= 1:10) | qemu-user-static"],
         )
 
 

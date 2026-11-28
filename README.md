@@ -140,13 +140,16 @@ Rover SITL in a container, which it pulls on first run.
 
 **The SITL image is x86-64 only.** On an arm64 machine (a Raspberry Pi, a
 Graviton instance, or an Ubuntu VM on Apple silicon) it runs under qemu.
-`scout-sim` recommends `qemu-user-static`, so a plain `apt install` brings it,
-but not with `--no-install-recommends` or when it's already missing. Check
-before installing:
+`scout-sim` recommends the right qemu package, so a plain `apt install` brings
+it, but `--no-install-recommends` doesn't. To check first, or to add it by hand:
 
 ```sh
 uname -m                                       # x86_64: nothing to do
-sudo apt install qemu-user-static              # arm64: x86-64 emulation
+# arm64, Debian 13 / Ubuntu 25.10 or later (qemu 10+; here qemu-user-static
+# is only a name: "has no installation candidate"):
+sudo apt install qemu-user-binfmt
+# arm64, older releases (e.g. Ubuntu 24.04, Debian 12):
+sudo apt install qemu-user-static
 ls /proc/sys/fs/binfmt_misc/ | grep x86_64     # should list qemu-x86_64
 ```
 
@@ -156,7 +159,7 @@ at 5 or below there (see below).
 ```sh
 # with $repo, $tag and $version set as in "Install on the boat":
 curl -fsSLO "$repo/releases/download/$tag/scout-sim_${version}_all.deb"
-sudo apt install ./scout*_"$version"_all.deb  # boat packages + scout-sim (+ docker.io, qemu-user-static)
+sudo apt install ./scout*_"$version"_all.deb  # boat packages + scout-sim (+ docker.io, qemu on arm64)
 journalctl -u scout-sitl -f                   # first run: pulls the SITL image (several GB
                                               # unpacked), then "starting SITL x1"; Ctrl-C
 sudo -u scout scout-lowpower set-mission \
@@ -183,8 +186,9 @@ sudo -u scout scout-lowpower set-mission \
 **If `scout-sitl` fails,** `journalctl -u scout-sitl` says why, and systemd
 stops retrying until you've fixed it:
 - **"can't run the x86-64 SITL image: no x86-64 emulation"** (older releases:
-  `exec format error`): install `qemu-user-static` as above, then `sudo systemctl
-  restart scout-sitl`.
+  `exec format error`): install qemu as above (`qemu-user-binfmt` or
+  `qemu-user-static`, depending on the release), then `sudo systemctl restart
+  scout-sitl`.
 - **"docker is not installed":** `sudo apt install docker.io`, then restart it.
 - **"the docker daemon isn't running":** `sudo systemctl start docker`. It
   keeps retrying meanwhile.

@@ -30,13 +30,15 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
   docker pull --platform linux/amd64 "$image"
 fi
 # The image is x86-64 only. Elsewhere the kernel needs x86-64 emulation
-# (qemu-user-static registers it with binfmt_misc). Try it rather than guess
+# (qemu-user-binfmt or qemu-user-static registers it with binfmt_misc; see
+# build_debs.py's scout-sim Recommends). Try it rather than guess
 # from handler names: without it every start fails with "exec format error".
 if [ "$(uname -m)" != x86_64 ] \
   && ! out="$(docker run --rm --platform linux/amd64 --entrypoint /bin/true "$image" 2>&1)" \
   && echo "$out" | grep -q "exec format error"; then
   fatal "this $(uname -m) machine can't run the x86-64 SITL image: no x86-64 emulation." \
-    "Install it (sudo apt install qemu-user-static), check that" \
+    "Install it: sudo apt install qemu-user-binfmt on Debian 13 and Ubuntu 25.10 or later," \
+    "sudo apt install qemu-user-static before them. Check that" \
     "/proc/sys/fs/binfmt_misc/qemu-x86_64 exists, then sudo systemctl restart scout-sitl." \
     "Emulated SITL manages about 5x real time at most."
 fi
