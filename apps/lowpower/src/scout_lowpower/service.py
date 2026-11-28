@@ -144,7 +144,7 @@ class Telemetry:
             self.sog = msg["groundspeed"]
             h = math.radians(msg["heading"])
             self.headings.append((now, math.cos(h), math.sin(h)))
-            self.throttle.append((now, msg["throttle"]))
+            self.throttle.append((now, M.signed16(msg["throttle"])))
         # Keep what the longest window needs: a whole Starlink cycle
         # (_observe_current), at least 15 min.
         keep = max(900.0, self.st.starlink_period_s)

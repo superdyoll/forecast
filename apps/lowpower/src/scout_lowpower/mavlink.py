@@ -154,6 +154,12 @@ def crc_x25(data: bytes, crc: int = 0xFFFF) -> int:
     return crc
 
 
+def signed16(v: int) -> int:
+    """A uint16 field ArduPilot fills with a signed value: VFR_HUD.throttle is
+    -1 % (65535) when Rover brakes in reverse."""
+    return v - 65536 if v >= 32768 else v
+
+
 def encode_payload(name: str, **values) -> bytes:
     m = MESSAGES[name]
     args = []

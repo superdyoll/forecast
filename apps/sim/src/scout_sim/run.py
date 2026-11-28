@@ -153,7 +153,7 @@ class Sim:
             self.lat, self.lon = m["lat"] / 1e7, m["lon"] / 1e7
             self.vel = (m["vx"] / 100, m["vy"] / 100)
         elif n == "VFR_HUD":  # for the truth: does the hull move along its yaw?
-            self.heading, self.throttle = m["heading"], m["throttle"]
+            self.heading, self.throttle = m["heading"], M.signed16(m["throttle"])
         elif n == "STATUSTEXT" and self.a.verbose:
             log.info("SITL: %s", m["text"])
 

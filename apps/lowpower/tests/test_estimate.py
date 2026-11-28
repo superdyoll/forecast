@@ -130,6 +130,14 @@ class Estimate(unittest.TestCase):
         self.observe(now, times=1)
         self.assertAlmostEqual(self.svc.stw_max, 0.5, delta=0.02)
 
+    def test_reverse_throttle_is_not_full_throttle(self):
+        # SITL validation run: Rover brakes at -1 %, sent as 65535 in VFR_HUD's
+        # uint16 field. Read unsigned, a few of those averaged as full throttle.
+        self.svc.plan = plan("transit", 0.9)
+        self.observe(self.feed(0.3, 0.0, throttle=65535), times=5)
+        self.assertIsNone(self.svc.stw_max)
+        self.assertEqual(self.svc.tel.throttle[-1][1], -1)
+
     def test_no_top_speed_learnt_from_the_controller_lagging(self):
         # Regression (overnight runs transit-night and transit-free): SITL
         # often made 0.1+ m/s less than a low command at part throttle. With
