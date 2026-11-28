@@ -57,6 +57,7 @@ class Estimate(unittest.TestCase):
         ground=None,
         t0=T0,
         starlink=None,
+        throttle=30,
     ):
         """An hour at 1 Hz of a boat holding `stw` through the water on
         `heading_deg` in CURRENT, Starlink on for the first `starlink_first_s`
@@ -83,6 +84,7 @@ class Estimate(unittest.TestCase):
                     "name": "VFR_HUD",
                     "groundspeed": math.hypot(*ground),
                     "heading": heading_deg,
+                    "throttle": throttle,
                 },
                 {
                     "name": "BATTERY_STATUS",
@@ -124,9 +126,18 @@ class Estimate(unittest.TestCase):
     def test_top_speed_learnt_when_the_boat_cant_make_its_command(self):
         # Asked for 1.0 m/s over ground; it makes ~0.58 at 0.5 through the water.
         self.svc.plan = plan("transit", 1.0)
-        now = self.feed(0.5, 0.0)
+        now = self.feed(0.5, 0.0, throttle=100)
         self.observe(now, times=1)
         self.assertAlmostEqual(self.svc.stw_max, 0.5, delta=0.02)
+
+    def test_no_top_speed_learnt_from_the_controller_lagging(self):
+        # Regression (overnight runs transit-night and transit-free): SITL
+        # often made 0.1+ m/s less than a low command at part throttle. With
+        # an STW read low from a few W, the cap ratcheted down to 0.34 m/s
+        # and the boat crawled past its deadline with energy to spare.
+        self.svc.plan = plan("transit", 0.9)
+        self.observe(self.feed(0.3, 0.0, throttle=20), times=5)
+        self.assertIsNone(self.svc.stw_max)
 
     def test_no_top_speed_learnt_from_the_start_before_arming(self):
         # Regression (overnight SITL run transit-s1): disarmed in MANUAL at
@@ -228,12 +239,23 @@ class Estimate(unittest.TestCase):
         tel = self.svc.tel
         for k in range(600):
             tel.update(
-                {"name": "VFR_HUD", "groundspeed": 0.5, "heading": k * 7}, T0 + k
+                {
+                    "name": "VFR_HUD",
+                    "groundspeed": 0.5,
+                    "heading": k * 7,
+                    "throttle": 0,
+                },
+                T0 + k,
             )
         self.assertIsNone(tel.mean_heading(600, T0 + 600))
         for k in range(600):
             tel.update(
-                {"name": "VFR_HUD", "groundspeed": 0.5, "heading": 355 + k % 2 * 10},
+                {
+                    "name": "VFR_HUD",
+                    "groundspeed": 0.5,
+                    "heading": 355 + k % 2 * 10,
+                    "throttle": 0,
+                },
                 T0 + 600 + k,
             )
         self.assertLess(

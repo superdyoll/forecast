@@ -115,6 +115,7 @@ class Telemetry:
         self.sog = None
         self.ground = deque()  # (monotonic t, north m/s, east m/s) over ground
         self.headings = deque()  # (monotonic t, unit north, unit east)
+        self.throttle = deque()  # (monotonic t, %)
 
     def update(self, msg: dict, now: float) -> None:
         n = msg["name"]
@@ -149,10 +150,11 @@ class Telemetry:
             self.sog = msg["groundspeed"]
             h = math.radians(msg["heading"])
             self.headings.append((now, math.cos(h), math.sin(h)))
+            self.throttle.append((now, msg["throttle"]))
         # Keep what the longest window needs: a whole Starlink cycle
         # (_observe_current), at least 15 min.
         keep = max(900.0, self.st.starlink_period_s)
-        for q in (self.load, self.solar, self.ground, self.headings):
+        for q in (self.load, self.solar, self.ground, self.headings, self.throttle):
             while q and now - q[0][0] > keep:
                 q.popleft()
 
@@ -777,6 +779,7 @@ class Service:
                 pl.speed_ms,
                 math.hypot(*ground),
                 E.stw_for_power(self.params, prop),
+                t.mean(t.throttle, window, now),
             )
         # A window shorter than a Starlink cycle is noisier: weigh it less.
         self.current = C.blend(self.current, obs, 0.3 * span / full)

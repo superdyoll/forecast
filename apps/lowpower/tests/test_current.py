@@ -52,16 +52,22 @@ class Estimate(unittest.TestCase):
 
 
 class TopSpeed(unittest.TestCase):
-    def test_short_of_the_command_means_at_the_limit(self):
-        self.assertAlmostEqual(C.learn_top_speed(None, 1.2, 0.7, 0.3), 0.3)
-        self.assertAlmostEqual(C.learn_top_speed(0.5, 1.2, 0.7, 0.3), 0.44)
+    def test_short_of_the_command_at_full_throttle_means_at_the_limit(self):
+        self.assertAlmostEqual(C.learn_top_speed(None, 1.2, 0.7, 0.3, 100), 0.3)
+        self.assertAlmostEqual(C.learn_top_speed(0.5, 1.2, 0.7, 0.3, 95), 0.44)
+
+    def test_short_at_part_throttle_is_the_controller_lagging(self):
+        # SITL at a low command: 0.1+ m/s short, a few W, an STW read too low.
+        self.assertIsNone(C.learn_top_speed(None, 0.7, 0.55, 0.35, 20))
+        self.assertEqual(C.learn_top_speed(0.9, 0.7, 0.55, 0.35, 20), 0.9)
+        self.assertEqual(C.learn_top_speed(0.9, 0.7, 0.55, 0.35, None), 0.9)
 
     def test_making_the_command_faster_raises_the_cap(self):
-        self.assertEqual(C.learn_top_speed(0.3, 0.6, 0.6, 0.5), 0.5)
+        self.assertEqual(C.learn_top_speed(0.3, 0.6, 0.6, 0.5, 30), 0.5)
 
     def test_otherwise_nothing_learnt(self):
-        self.assertIsNone(C.learn_top_speed(None, 0.6, 0.6, 0.4))
-        self.assertEqual(C.learn_top_speed(0.5, 0.6, 0.6, 0.4), 0.5)
+        self.assertIsNone(C.learn_top_speed(None, 0.6, 0.6, 0.4, 100))
+        self.assertEqual(C.learn_top_speed(0.5, 0.6, 0.6, 0.4, 30), 0.5)
 
 
 class Starlink(unittest.TestCase):

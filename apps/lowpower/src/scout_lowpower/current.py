@@ -120,18 +120,22 @@ def along_leg(v_cmd: float, unit, current, stw_max: float):
     return sog, stw
 
 
-def learn_top_speed(cap, commanded: float, sog: float, stw: float):
+FULL_THROTTLE_PCT = 90.0  # VFR_HUD throttle (ArduPilot's THR_MAX is 100 %)
+
+
+def learn_top_speed(cap, commanded: float, sog: float, stw: float, throttle_pct):
     """The hull's real top speed through the water, learnt while motoring.
 
-    Making clearly less over ground than commanded means the boat is at its
-    limit: the speed through the water it holds then (from the measured
-    power) is its top speed. That may be at low power (a throttle or current
-    limit), so the window must only hold the autopilot doing what the plan
-    asked (window_s). Going faster through the water than `cap` shows the
-    cap is too low. Otherwise nothing is learnt. `cap` is None until the
-    first observation.
+    At its limit the boat makes clearly less over ground than commanded with
+    the throttle saturated: the speed through the water it holds then (from
+    the measured power) is its top speed. Falling short at part throttle is
+    the speed controller lagging, not a limit (SITL sits ~0.1 m/s under a low
+    command), and low power reads as too low a speed through the water: that
+    teaches nothing. The window must only hold the autopilot doing what the
+    plan asked (window_s). Going faster through the water than `cap` shows
+    the cap is too low. `cap` is None until the first observation.
     """
-    if sog < commanded - 0.1:
+    if sog < commanded - 0.1 and (throttle_pct or 0.0) >= FULL_THROTTLE_PCT:
         return stw if cap is None else cap + 0.3 * (stw - cap)
     if cap is not None and stw > cap:
         return stw

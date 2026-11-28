@@ -131,7 +131,7 @@ def run(a) -> dict:
     ):
         plan, current, cloud_obs, stw_max = None, (0.0, 0.0), [], None
         current_mean = (0.0, 0.0)
-        recent = []  # (t, load W, solar W, ground, heading)
+        recent = []  # (t, load W, solar W, ground, heading, throttle %)
         leg, leg_t = (0, False), start  # (next_wp, at_final) and when it began
         action_t = start  # when the plan's action last changed
         truth_pct = {}  # minute -> battery reading
@@ -146,7 +146,9 @@ def run(a) -> dict:
                 leg, leg_t = (boat.next_wp, boat.at_final), t
             motors = plan is not None and plan.action in ("transit", "hold")
             pw = power.step(t, STEP_S, boat.lat, boat.lon, stw, motors, env.cloud(t))
-            recent.append((t, pw["load_w"], pw["solar_w"], ground, heading))
+            # Throttle as ArduPilot reports it: full only at the hull's limit.
+            throttle = 100.0 * min(1.0, stw / boat.top)
+            recent.append((t, pw["load_w"], pw["solar_w"], ground, heading, throttle))
             # A whole Starlink cycle, as the service averages (_observe_current).
             recent = [r for r in recent if (t - r[0]).total_seconds() <= 3600]
             truth_pct[int(t.timestamp() // 60)] = pw["pct"]
@@ -204,6 +206,7 @@ def run(a) -> dict:
                             plan.speed_ms,
                             math.hypot(*g),
                             E.stw_for_power(params, prop),
+                            sum(r[5] for r in win) / len(win),
                         )
             if k % (DECIDE_S // STEP_S) == 0:
                 cloud = C.cloud_factor(cloud_obs)
