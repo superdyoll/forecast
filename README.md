@@ -5,7 +5,7 @@ boat. Standard library only (Python 3.9+), so it runs on the boat's computer.
 The one-page write-up is [WRITEUP.md](WRITEUP.md); the full report, with how
 every figure was made, is [REPORT.md](REPORT.md).
 
-## Quick start
+## Quick start (using source code)
 
 ```sh
 git clone https://github.com/superdyoll/forecast.git && cd forecast
@@ -31,7 +31,7 @@ Each app in `apps/` is its own wheel. Dependencies only point down the table.
 
 `model/lstm/` is a training experiment, not an app.
 
-## Install on the boat (Debian/Ubuntu, apt)
+## Install on a boat (Debian/Ubuntu, apt)
 
 `scout-lowpower` reads the operator's mission (a local file: no shore link
 needed), forecasts the battery for each way of operating and commands ArduPilot
@@ -42,6 +42,7 @@ apt index for them. Download the latest release's boat debs (`scout` is a
 metapackage, so it needs the three it depends on):
 
 ```sh
+cd /tmp
 repo=https://github.com/superdyoll/forecast
 # /releases/latest redirects to the newest tag, e.g. .../releases/tag/v0.1.1
 tag="$(curl -fsSLo /dev/null -w '%{url_effective}' "$repo/releases/latest")"
@@ -58,10 +59,6 @@ every Debian.
 
 ```sh
 sudo apt install ./scout*_"$version"_all.deb  # forecast + lowpower + web; units start
-# or from a copy of all the release's files (debs + Packages + Release):
-#   echo "deb [trusted=yes] file:/srv/scout ./" | sudo tee /etc/apt/sources.list.d/scout.list
-#   sudo apt update && sudo apt install scout
-# /etc/scout/params.json is the 17-day fit; replace it if you have a newer one
 sudoedit /etc/scout/scout.env                 # SCOUT_MAVLINK etc.; kept across upgrades
 sudo systemctl restart scout-lowpower
 sudo -u scout scout-lowpower set-mission --transit 60.30,2.20 60.50,2.20 --reserve 30
@@ -138,6 +135,7 @@ The simulator is the boat install plus one package, `scout-sim`. It needs
 docker (apt installs `docker.io` if no docker is present) and runs ArduPilot
 Rover SITL in a container, which it pulls on first run.
 
+#### Running on ARM (skip if x86_64)
 **The SITL image is x86-64 only.** On an arm64 machine (a Raspberry Pi, a
 Graviton instance, or an Ubuntu VM on Apple silicon) it runs under qemu.
 `scout-sim` recommends the right qemu package, so a plain `apt install` brings
@@ -156,12 +154,17 @@ ls /proc/sys/fs/binfmt_misc/ | grep x86_64     # should list qemu-x86_64
 Emulated SITL manages about 5× real time at most, so keep `SCOUT_CLOCK`'s rate
 at 5 or below there (see below).
 
+#### Install simulator
+Run in the same terminal as the prior install, or re-run the deb download to set the variables
+
 ```sh
 # with $repo, $tag and $version set as in "Install on the boat":
 curl -fsSLO "$repo/releases/download/$tag/scout-sim_${version}_all.deb"
 sudo apt install ./scout*_"$version"_all.deb  # boat packages + scout-sim (+ docker.io, qemu on arm64)
 journalctl -u scout-sitl -f                   # first run: pulls the SITL image (several GB
                                               # unpacked), then "starting SITL x1"; Ctrl-C
+
+# Example mission
 sudo -u scout scout-lowpower set-mission \
   --transit 60.215,2.210 60.230,2.240 60.240,2.200 --arrive-in 4 --reserve 30
 xdg-open http://127.0.0.1:8080                # updates itself every few seconds
