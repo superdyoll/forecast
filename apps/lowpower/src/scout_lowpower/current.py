@@ -53,6 +53,23 @@ def observe(
     return None
 
 
+FULL_POWER = 0.8  # of the model's top propulsion power: "flat out"
+SETTLE_S = 120.0  # boat seconds after a change of plan or leg before averaging
+MIN_SPAN_S = 300.0  # the shortest window worth an estimate
+
+
+def window_s(since_change_s: float, full_s: float) -> float | None:
+    """How many boat seconds of telemetry to average, or None for none yet.
+
+    The whole of `full_s` (a Starlink cycle, so its sessions average out),
+    but never reaching back past the last change of plan or leg, less
+    SETTLE_S: a window across a turn mixes two legs' headings and ground
+    velocities, and one across the start mixes in the boat at rest.
+    """
+    span = min(full_s, since_change_s - SETTLE_S)
+    return span if span >= MIN_SPAN_S else None
+
+
 def cloud_factor(obs) -> float | None:
     """Observed / clear-sky solar over [(time, observed W, clear-sky W), ...]
     (sun up only), or None with fewer than 4 observations."""
@@ -87,16 +104,17 @@ def along_leg(v_cmd: float, unit, current, stw_max: float):
     return sog, stw
 
 
-def learn_top_speed(cap, commanded: float, sog: float, stw: float):
+def learn_top_speed(cap, commanded: float, sog: float, stw: float, full_power: bool):
     """The hull's real top speed through the water, learnt while motoring.
 
-    Making clearly less over ground than commanded means the boat is at its
-    limit: the speed through the water it holds then (from the measured
-    power) is its top speed. Making the commanded speed at a higher water
-    speed than `cap` shows the cap is too low. Otherwise nothing is learnt.
-    `cap` is None until the first observation.
+    Making clearly less over ground than commanded at (near) full power
+    means the boat is at its limit: the speed through the water it holds
+    then (from the measured power) is its top speed. Short of the command at
+    low power is not a limit (accelerating, or a window spanning the start).
+    Going faster through the water than `cap` shows the cap is too low.
+    Otherwise nothing is learnt. `cap` is None until the first observation.
     """
-    if sog < commanded - 0.1:
+    if full_power and sog < commanded - 0.1:
         return stw if cap is None else cap + 0.3 * (stw - cap)
     if cap is not None and stw > cap:
         return stw

@@ -53,15 +53,34 @@ class Estimate(unittest.TestCase):
 
 class TopSpeed(unittest.TestCase):
     def test_short_of_the_command_means_at_the_limit(self):
-        self.assertAlmostEqual(C.learn_top_speed(None, 1.2, 0.7, 0.3), 0.3)
-        self.assertAlmostEqual(C.learn_top_speed(0.5, 1.2, 0.7, 0.3), 0.44)
+        self.assertAlmostEqual(C.learn_top_speed(None, 1.2, 0.7, 0.3, True), 0.3)
+        self.assertAlmostEqual(C.learn_top_speed(0.5, 1.2, 0.7, 0.3, True), 0.44)
 
     def test_making_the_command_faster_raises_the_cap(self):
-        self.assertEqual(C.learn_top_speed(0.3, 0.6, 0.6, 0.5), 0.5)
+        self.assertEqual(C.learn_top_speed(0.3, 0.6, 0.6, 0.5, False), 0.5)
+
+    def test_short_of_the_command_at_low_power_is_not_a_limit(self):
+        # Overnight SITL run transit-s1: a window spanning the stationary start
+        # read 0.2 m/s over ground for a 0.7 command at a few watts and learnt
+        # a 0.40 m/s top speed; the hull then made 0.9.
+        self.assertIsNone(C.learn_top_speed(None, 0.7, 0.2, 0.25, False))
+        self.assertEqual(C.learn_top_speed(0.8, 0.7, 0.2, 0.25, False), 0.8)
 
     def test_otherwise_nothing_learnt(self):
-        self.assertIsNone(C.learn_top_speed(None, 0.6, 0.6, 0.4))
-        self.assertEqual(C.learn_top_speed(0.5, 0.6, 0.6, 0.4), 0.5)
+        self.assertIsNone(C.learn_top_speed(None, 0.6, 0.6, 0.4, False))
+        self.assertEqual(C.learn_top_speed(0.5, 0.6, 0.6, 0.4, False), 0.5)
+
+
+class Window(unittest.TestCase):
+    def test_a_whole_cycle_when_nothing_changed(self):
+        self.assertEqual(C.window_s(10_000, 3600), 3600)
+
+    def test_never_back_past_a_change_less_the_settling(self):
+        self.assertEqual(C.window_s(1200, 3600), 1200 - C.SETTLE_S)
+
+    def test_none_until_there_is_enough(self):
+        self.assertIsNone(C.window_s(C.SETTLE_S + C.MIN_SPAN_S - 1, 3600))
+        self.assertEqual(C.window_s(C.SETTLE_S + C.MIN_SPAN_S, 3600), C.MIN_SPAN_S)
 
 
 class Model(unittest.TestCase):

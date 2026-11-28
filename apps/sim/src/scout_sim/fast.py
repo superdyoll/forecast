@@ -131,7 +131,8 @@ def run(a) -> dict:
     ):
         plan, current, cloud_obs, stw_max = None, (0.0, 0.0), [], None
         current_mean = (0.0, 0.0)
-        recent = []  # (t, load W, solar W, ground)
+        recent = []  # (t, load W, solar W, ground, heading)
+        leg, leg_t = (0, False), start  # (next_wp, at_final) and when it began
         truth_pct = {}  # minute -> battery reading
         rows, actions = [], {}
         t = start
@@ -140,6 +141,8 @@ def run(a) -> dict:
         while t < end:
             drift = env.drift(t)
             stw, ground, heading = boat.step(plan, drift, STEP_S)
+            if (boat.next_wp, boat.at_final) != leg:
+                leg, leg_t = (boat.next_wp, boat.at_final), t
             motors = plan is not None and plan.action in ("transit", "hold")
             pw = power.step(t, STEP_S, boat.lat, boat.lon, stw, motors, env.cloud(t))
             recent.append((t, pw["load_w"], pw["solar_w"], ground, heading))
@@ -168,17 +171,19 @@ def run(a) -> dict:
                 clear = E.clear_sky_w(params, t, boat.lat, boat.lon)
                 cloud_obs = [o for o in cloud_obs if (t - o[0]).total_seconds() < 86400]
                 cloud_obs.append((t, solar, clear))
-                settled = (
-                    plan and plan.since and (t - plan.since).total_seconds() >= 600
-                )
-                if settled:
-                    g = tuple(
-                        sum(r[3][i] for r in recent) / len(recent) for i in (0, 1)
-                    )
-                    hn = sum(math.cos(math.radians(r[4])) for r in recent)
-                    he = sum(math.sin(math.radians(r[4])) for r in recent)
+                # As the service: a Starlink cycle, not back past the plan's
+                # or the leg's start (current.window_s).
+                span = None
+                if plan and plan.since:
+                    since = (t - max(plan.since, leg_t)).total_seconds()
+                    span = C.window_s(since, 3600.0)
+                win = [r for r in recent if span and (t - r[0]).total_seconds() <= span]
+                if win:
+                    g = tuple(sum(r[3][i] for r in win) / len(win) for i in (0, 1))
+                    hn = sum(math.cos(math.radians(r[4])) for r in win)
+                    he = sum(math.sin(math.radians(r[4])) for r in win)
                     heading = math.degrees(math.atan2(he, hn)) % 360  # vector mean
-                    load = sum(r[1] for r in recent) / len(recent)
+                    load = sum(r[1] for r in win) / len(win)
                     # The boat always does what the plan asks: right mode, and
                     # armed exactly when the motors run.
                     obs = C.observe(
@@ -192,7 +197,7 @@ def run(a) -> dict:
                         load,
                     )
                     if obs is not None:
-                        current = C.blend(current, obs, 0.3)
+                        current = C.blend(current, obs, 0.3 * span / 3600.0)
                         current_mean = C.blend(current_mean, obs, OBSERVE_S / 86400)
                     if plan.action == "transit" and plan.speed_ms:
                         prop = load - E.base_load_w(params, plan.starlink_duty)
@@ -201,6 +206,7 @@ def run(a) -> dict:
                             plan.speed_ms,
                             math.hypot(*g),
                             E.stw_for_power(params, prop),
+                            prop >= C.FULL_POWER * E.max_propulsion_w(params),
                         )
             if k % (DECIDE_S // STEP_S) == 0:
                 cloud = C.cloud_factor(cloud_obs)

@@ -111,6 +111,7 @@ class Telemetry:
         self.load = deque()  # (monotonic t, W)
         self.solar = deque()
         self.mission_seq = None
+        self.leg_t = None  # monotonic time the current mission item began
         self.sog = None
         self.ground = deque()  # (monotonic t, north m/s, east m/s) over ground
         self.headings = deque()  # (monotonic t, unit north, unit east)
@@ -141,6 +142,8 @@ class Telemetry:
             elif msg["id"] == self.st.solar_id and amps is not None and v:
                 self.solar.append((now, abs(amps) * v))
         elif n == "MISSION_CURRENT":
+            if msg["seq"] != self.mission_seq:
+                self.leg_t = now  # a new leg (or a new mission): a turn
             self.mission_seq = msg["seq"]
         elif n == "VFR_HUD":
             self.sog = msg["groundspeed"]
@@ -716,13 +719,22 @@ class Service:
         """Estimate the water current (current.py): under thrust from measured
         propulsion power and heading, or with motors off from the drift."""
         t, pl = self.tel, self.plan
-        if not pl or pl.since is None or (_now() - pl.since).total_seconds() < 600:
-            return  # let the boat settle into the plan first (boat seconds)
+        if not pl or pl.since is None:
+            return
         # Average over a whole Starlink cycle: propulsion = load - hotel -
         # Starlink, and Starlink comes in sessions, so a shorter window can be
         # all-on or all-off (+-15 W, more than the propulsion itself at low
-        # speed). Telemetry windows are in real seconds: scale by the clock rate.
-        window = max(30.0, max(600.0, self.st.starlink_period_s) / clock.rate())
+        # speed). But not back past the plan's start or the current leg's
+        # (current.window_s). Telemetry is in real seconds: scale by the rate.
+        rate = clock.rate()
+        since = (_now() - pl.since).total_seconds()
+        if t.leg_t is not None:
+            since = min(since, (now - t.leg_t) * rate)
+        full = max(600.0, self.st.starlink_period_s)
+        span = C.window_s(since, full)
+        if span is None:
+            return
+        window = span / rate
         ground = t.ground_velocity(window, now)
         if ground is None:
             return
@@ -746,8 +758,10 @@ class Service:
                 pl.speed_ms,
                 math.hypot(*ground),
                 E.stw_for_power(self.params, prop),
+                prop >= C.FULL_POWER * E.max_propulsion_w(self.params),
             )
-        self.current = C.blend(self.current, obs, 0.3)
+        # A window shorter than a Starlink cycle is noisier: weigh it less.
+        self.current = C.blend(self.current, obs, 0.3 * span / full)
         # Observed about once a boat minute: a ~24 h average of the same.
         self.current_mean = C.blend(self.current_mean, obs, 60.0 / 86400)
         log.debug(

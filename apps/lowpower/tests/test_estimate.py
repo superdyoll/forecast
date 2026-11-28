@@ -46,7 +46,9 @@ class Estimate(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def feed(self, stw, heading_deg, seconds=3600, starlink_first_s=900, ground=None):
+    def feed(
+        self, stw, heading_deg, seconds=3600, starlink_first_s=900, ground=None, t0=T0
+    ):
         """An hour at 1 Hz of a boat holding `stw` through the water on
         `heading_deg` in CURRENT, Starlink on for the first `starlink_first_s`
         of it (a 25 % duty), as the service sees it. Returns the last time."""
@@ -56,7 +58,7 @@ class Estimate(unittest.TestCase):
             ground = (water[0] + CURRENT[0], water[1] + CURRENT[1])
         tel = self.svc.tel
         for k in range(seconds):
-            now = T0 + k
+            now = t0 + k
             load = E.load_component(PARAMS, "hotel_w") + E.propulsion_w(PARAMS, stw)
             if k < starlink_first_s:
                 load += E.load_component(PARAMS, "starlink_w")
@@ -111,11 +113,44 @@ class Estimate(unittest.TestCase):
         self.assertCurrent(self.observe(now), CURRENT)
 
     def test_top_speed_learnt_when_the_boat_cant_make_its_command(self):
-        # Asked for 1.0 m/s over ground; it makes ~0.58 at 0.5 through the water.
-        self.svc.plan = plan("transit", 1.0)
-        now = self.feed(0.5, 0.0)
+        # Asked for 1.2 m/s over ground; flat out (0.82 through the water,
+        # ~65 W) it makes ~0.87.
+        self.svc.plan = plan("transit", 1.2)
+        now = self.feed(0.82, 0.0)
         self.observe(now, times=1)
-        self.assertAlmostEqual(self.svc.stw_max, 0.5, delta=0.02)
+        self.assertAlmostEqual(self.svc.stw_max, 0.82, delta=0.02)
+
+    def test_no_top_speed_learnt_from_a_slow_start(self):
+        # Regression (overnight SITL run transit-s1): the boat at rest for the
+        # first half hour, then under way at 0.3 m/s through the water. Short
+        # of a 0.7 command, but at a few watts: not the hull's limit.
+        self.svc.plan = plan("transit", 0.7)
+        self.feed(0.0, 0.0, seconds=1800, ground=(0.0, 0.0))
+        now = self.feed(0.3, 0.0, seconds=1800, t0=T0 + 1800)
+        self.observe(now, times=5)
+        self.assertIsNone(self.svc.stw_max)
+
+    def test_after_a_turn_only_the_new_leg_counts(self):
+        # Regression (transit-s1, 08:15): the hour before a turn mixed two
+        # legs and read the current's east component with the wrong sign.
+        tel = self.svc.tel
+        self.svc.plan = plan("transit", 0.5)
+        tel.update({"name": "MISSION_CURRENT", "seq": 1}, T0)
+        self.feed(0.5, 0.0, seconds=3000)  # north
+        tel.update({"name": "MISSION_CURRENT", "seq": 2}, T0 + 3000)
+        # Then 15 min west, Starlink at its 25 % duty. A window shorter than a
+        # Starlink cycle can't average its sessions out (here it sees 13 % on
+        # against the 25 % assumed: ~0.03 m/s off), so short windows weigh less.
+        now = self.feed(0.5, 270.0, seconds=900, starlink_first_s=225, t0=T0 + 3000)
+        self.assertCurrent(self.observe(now, times=80), CURRENT, tol=0.05)
+
+    def test_nothing_until_the_new_leg_has_settled(self):
+        tel = self.svc.tel
+        self.svc.plan = plan("transit", 0.5)
+        self.feed(0.5, 0.0, seconds=3000)
+        tel.update({"name": "MISSION_CURRENT", "seq": 2}, T0 + 3000)
+        now = self.feed(0.5, 270.0, seconds=300, t0=T0 + 3000)  # 5 min in
+        self.assertEqual(self.observe(now, times=5), (0.0, 0.0))
 
     def test_no_top_speed_learnt_when_the_command_is_met(self):
         self.svc.plan = plan("transit", 0.5)
