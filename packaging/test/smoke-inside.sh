@@ -59,8 +59,12 @@ python3 -c 'import json; assert json.load(open("/etc/scout/params.json"))["capac
 
 step "services were enabled and started by the package"
 wait_for 20 systemctl is-active -q scout-lowpower scout-web || fail "services not active"
-! journalctl -u scout-lowpower --no-pager -o cat | grep -q "can't read energy params" \
-  || fail "service didn't load /etc/scout/params.json"
+# This run of the service only: an upgraded-from release may predate params.json.
+invocation="$(systemctl show -p InvocationID --value scout-lowpower)"
+this_run() { journalctl --no-pager -o cat _SYSTEMD_INVOCATION_ID="$invocation"; }
+wait_for 10 sh -c "journalctl --no-pager -o cat _SYSTEMD_INVOCATION_ID=$invocation | grep -q 'starting:'" \
+  || fail "no journal for this run of the service"
+! this_run | grep -q "can't read energy params" || fail "service didn't load /etc/scout/params.json"
 systemctl is-enabled -q scout-lowpower scout-web || fail "services not enabled"
 wait_for 20 curl -fsS -o /dev/null http://127.0.0.1:8080/ || fail "web page"
 curl -fsS http://127.0.0.1:8080/api/live | python3 -c 'import json, sys; json.load(sys.stdin)' \
