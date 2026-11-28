@@ -275,6 +275,12 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
             best = max(feasible, key=lambda o: o.speed)
             if deadline_h <= 0:
                 why = f"the deadline passed {-deadline_h:.1f} h ago"
+            elif not any(o.hours_to_go <= deadline_h for o in opts):
+                # Energy isn't the limit: no speed gets there in time.
+                why = (
+                    f"no speed arrives in time, at the hull's top speed through "
+                    f"the water ({stw_max:.2f} m/s)"
+                )
             else:
                 why = f"deadline can't be met without going below {line:.0f}%"
             reasons.append(

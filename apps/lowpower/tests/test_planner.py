@@ -306,6 +306,29 @@ class PastDeadline(unittest.TestCase):
         self.assertGreaterEqual(p.speed_ms, fastest_safe.speed_ms)
 
 
+class DeadlineReasons(unittest.TestCase):
+    """Overnight SITL run transit-s1 said "deadline can't be met without going
+    below 35%" with a forecast low of 70 %: the hull, not energy, was the limit."""
+
+    def test_hull_limited(self):
+        m = transit(arrive_by=T0 + timedelta(hours=2))  # 33 km: needs ~4.6 m/s
+        p = decide(state(90), m, PARAMS)
+        text = " ".join(p.reasons)
+        self.assertIn("no speed arrives in time, at the hull's top speed", text)
+        self.assertNotIn("without going below", text)
+
+    def test_energy_limited(self):
+        # 33 km in 14 h needs ~0.7 m/s; at night with 55 % that would breach
+        # the reserve, so it goes at 0.4 m/s and arrives a day late.
+        m = transit(arrive_by=T0 + timedelta(hours=14))
+        p = decide(state(55, t=T0.replace(hour=20), cloud=0.1), m, PARAMS)
+        self.assertEqual((p.action, p.speed_ms), ("transit", 0.4))
+        self.assertGreater(p.eta, m.arrive_by)
+        self.assertIn(
+            "deadline can't be met without going below 35%", " ".join(p.reasons)
+        )
+
+
 class Geometry(unittest.TestCase):
     def test_legs_cross_the_180th_meridian_the_short_way(self):
         from scout_lowpower.mission import distance_m, legs, unit
