@@ -274,7 +274,7 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
         if feasible:  # can't make the deadline without breaching the reserve
             best = max(feasible, key=lambda o: o.speed)
             if deadline_h <= 0:
-                why = f"the deadline passed {-deadline_h:.1f} h ago"
+                why = f"the deadline passed {max(0.0, -deadline_h):.1f} h ago"
             elif not any(o.hours_to_go <= deadline_h for o in opts):
                 # Energy isn't the limit: no speed gets there in time.
                 why = (

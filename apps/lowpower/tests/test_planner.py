@@ -302,6 +302,8 @@ class PastDeadline(unittest.TestCase):
         self.assertEqual(p.action, "transit")
         self.assertIn("the deadline passed 1.0 h ago", " ".join(p.reasons))
         self.assertNotIn("without going below", " ".join(p.reasons))
+        now = decide(state(60), transit(arrive_by=T0), PARAMS)  # due right now
+        self.assertIn("the deadline passed 0.0 h ago", " ".join(now.reasons))
         fastest_safe = decide(state(60), transit(), PARAMS, Config(comfort_pct=0))
         self.assertGreaterEqual(p.speed_ms, fastest_safe.speed_ms)
 
@@ -320,8 +322,9 @@ class DeadlineReasons(unittest.TestCase):
     def test_energy_limited(self):
         # 33 km in 14 h needs ~0.7 m/s; at night with 55 % that would breach
         # the reserve, so it goes at 0.4 m/s and arrives a day late.
-        m = transit(arrive_by=T0 + timedelta(hours=14))
-        p = decide(state(55, t=T0.replace(hour=20), cloud=0.1), m, PARAMS)
+        night = T0.replace(hour=20)
+        m = transit(arrive_by=night + timedelta(hours=14))
+        p = decide(state(55, t=night, cloud=0.1), m, PARAMS)
         self.assertEqual((p.action, p.speed_ms), ("transit", 0.4))
         self.assertGreater(p.eta, m.arrive_by)
         self.assertIn(
