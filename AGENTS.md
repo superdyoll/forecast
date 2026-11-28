@@ -171,6 +171,17 @@ work around them a second time downstream.
   think in speed through the water. With current the two differ a lot (see
   REPORT.md). The service estimates the current and the real top speed through
   the water from measured propulsion power (`current.py`).
+- **The `sailboat-motor` hull is not Scout's.** Its motor gives 0.1 N per µs of
+  PWM above 1500 against about 0.5 v² of drag: 0.93 m/s at 1 % throttle,
+  1.8 m/s at 4 %, 9.8 m/s at 100 % (measured in still water, MANUAL; see
+  REPORT.md). Scout's whole range (≤ 0.85 m/s) is under 1 %, a few µs of
+  PWM, so ArduPilot holds speeds only in coarse steps and has no hull limit
+  (it made 1.3 m/s through the water into a storm). Speed-control and
+  power-at-speed results from SITL are artefacts; use `scout-sim fast` for
+  energy and decisions, SITL for MAVLink, missions and recovery.
+- The tide moves a motoring hull in full, but a hull at zero throttle only
+  partly (0.32 m/s in MANUAL, 0.19 in HOLD, for a 0.5 m/s tide), so drifting
+  in SITL isn't free drift.
 - A reboot shorter than the 5 s heartbeat timeout shows only in the boot clock
   (`time_boot_ms`); keep tests giving the fake autopilot a few seconds of uptime
   before rebooting it.
