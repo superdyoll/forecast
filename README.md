@@ -2,6 +2,8 @@
 
 Battery forecast and low-power mission mode for Scout, a solar-electric robot
 boat. Standard library only (Python 3.9+), so it runs on the boat's computer.
+The one-page write-up is [WRITEUP.md](WRITEUP.md); the full report, with how
+every figure was made, is [REPORT.md](REPORT.md).
 
 ## Quick start
 
@@ -77,7 +79,41 @@ journalctl -u scout-lowpower -f
 
 The packages pin each other to the same version. An upgrade restarts what was
 running and keeps your `scout.env` edits; `apt purge` removes config and state.
-Roll back by installing an older release's debs with `--allow-downgrades`.
+
+### Rolling out to one boat first, and rolling back
+
+1. **Before sea.** Every release has passed the unit tests, the scenario
+   gate (`scout-sim fast` runs in `apps/sim/tests/`) and the systemd smoke
+   test. On the chosen boat, install it on deck against the real autopilot
+   with `SCOUT_DRY_RUN=1` in `/etc/scout/scout.env`. Check that it sees
+   heartbeats, battery, load and solar, and that its decisions make sense.
+2. **Advisory at sea (one boat, one mission).** Keep `SCOUT_DRY_RUN=1`: the
+   service decides, forecasts and logs (journald and the web page) but sends
+   the autopilot nothing, and the operator flies the mission as today.
+   Compare its decisions with the operator's, and its forecast error by lead
+   time on the web page with REPORT.md's (about ±3–5 points at 6–12 h).
+3. **In control, same boat.** Set `SCOUT_DRY_RUN=0` and restart. Start with a
+   generous reserve (e.g. 40 %) and a short mission near support. The
+   operator stays on watch: switching the autopilot to MANUAL (or any mode
+   the service doesn't use) makes it stop commanding until the mode is handed
+   back.
+4. **More boats, one at a time,** from the same apt repository. Hold each
+   boat's version (`sudo apt-mark hold scout scout-forecast scout-lowpower
+   scout-web`) so a new release reaches a boat only when you choose.
+
+**Rolling back**, quickest first:
+- **Take control:** switch the autopilot to MANUAL. The service backs off at
+  once, with no shore link needed.
+- **Stop the service:** `sudo systemctl stop scout-lowpower`, plus `disable`
+  to keep it off after a reboot. It only closes its links on the way out, so
+  ArduPilot carries on with its stored mission at its last speed. `Restart=always`
+  doesn't apply to an explicit stop.
+- **Advisory again:** `SCOUT_DRY_RUN=1` in `scout.env`, then restart.
+- **Previous version:** `sudo apt install --allow-downgrades scout=X.Y.Z
+  scout-forecast=X.Y.Z scout-lowpower=X.Y.Z scout-web=X.Y.Z`, from the apt
+  repository or that release's debs. `scout.env` and the state in
+  `/var/lib/scout-lowpower` are kept. An older version that can't read the
+  newer state ignores it and starts fresh (tested).
 
 | Unit | Runs | Notes |
 | --- | --- | --- |

@@ -1,0 +1,17 @@
+Nov 28 09:10:57.725743 fa0f793ed0d0 systemd[1]: fake-rover.service: Sent signal SIGUSR1 to main process 578 (python3) on client request.
+Nov 28 09:10:57.983751 fa0f793ed0d0 python3[578]: link dropped for 20 s (still running)
+Nov 28 09:10:57.984012 fa0f793ed0d0 scout-lowpower[499]: WARNING MAVLink link closed: tcp:127.0.0.1:5760 (peer closed)
+Nov 28 09:10:59.041097 fa0f793ed0d0 scout-lowpower[499]: INFO MAVLink link open: tcp:127.0.0.1:5760
+Nov 28 09:10:59.041696 fa0f793ed0d0 scout-lowpower[499]: INFO resyncing with autopilot
+Nov 28 09:11:02.105080 fa0f793ed0d0 scout-lowpower[499]: INFO onboard mission differs (unknown items); uploading 4 items
+Nov 28 09:11:04.149327 fa0f793ed0d0 scout-lowpower[499]: WARNING mission upload attempt 1 failed
+Nov 28 09:11:06.194731 fa0f793ed0d0 scout-lowpower[499]: WARNING mission upload attempt 2 failed
+Nov 28 09:11:08.236850 fa0f793ed0d0 scout-lowpower[499]: WARNING mission upload attempt 3 failed
+Nov 28 09:11:08.237618 fa0f793ed0d0 scout-lowpower[499]: ERROR mission upload failed; retrying in 30 s
+Nov 28 09:11:08.695247 fa0f793ed0d0 scout-lowpower[499]: WARNING autopilot heartbeat lost (>5s); will resync when it returns
+Nov 28 09:11:17.985118 fa0f793ed0d0 python3[578]: link back
+Nov 28 09:11:17.985527 fa0f793ed0d0 scout-lowpower[499]: WARNING autopilot regained (sysid 1, mode AUTO)
+Nov 28 09:11:29.096021 fa0f793ed0d0 scout-lowpower[499]: INFO resyncing with autopilot
+Nov 28 09:11:29.139646 fa0f793ed0d0 scout-lowpower[499]: INFO onboard mission matches (4 items): kept
+Nov 28 09:11:29.156879 fa0f793ed0d0 scout-lowpower[499]: INFO plan: transit 0.3 m/s, starlink duty 0.25, battery 90.0%, forecast low 46.6%, ETA 11-29 16:04Z | 0.3 m/s arrives 30.9 h from now, 17.1 h before the deadline, with the most battery to spare (low point 47%)
+Nov 28 09:11:29.160988 fa0f793ed0d0 scout-lowpower[499]: INFO setting cruise speed 0.3 m/s

@@ -51,7 +51,10 @@ def _settings(a) -> Settings:
     st.interval_s = getattr(a, "interval_s", None) or max(
         15.0, DECIDE_EVERY_S / clock.rate()
     )
-    st.dry_run = bool(getattr(a, "dry_run", False))
+    # Advisory mode (a first boat): decide and log, command nothing.
+    st.dry_run = bool(getattr(a, "dry_run", False)) or os.environ.get(
+        "SCOUT_DRY_RUN", ""
+    ) not in ("", "0")
     relay = getattr(a, "starlink_relay", None)
     if relay is None and os.environ.get("SCOUT_STARLINK_RELAY"):
         relay = int(os.environ["SCOUT_STARLINK_RELAY"])

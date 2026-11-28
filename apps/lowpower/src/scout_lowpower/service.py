@@ -598,6 +598,7 @@ class Service:
                     self.retry_resync_at = now + RESYNC_RETRY_S
                     return
             else:
+                log.info("onboard mission matches (%d items): kept", len(items))
                 self.uploaded = onboard
             if (
                 self.ap.restarted_recently(now)

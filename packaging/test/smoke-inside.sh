@@ -85,6 +85,20 @@ wait_for 60 journal_has fake-rover "mode=10 " || fail "autopilot not put in AUTO
 wait_for 30 sh -c 'scout-lowpower status | grep -q "\"mode\": \"AUTO\""' \
   || fail "status doesn't show AUTO"
 
+step "the service rides out a link outage (autopilot still running)"
+pid="$(systemctl show -p MainPID --value scout-lowpower)"
+since="$(date '+%Y-%m-%d %H:%M:%S')"
+systemctl kill -s USR1 fake-rover
+since_has() { journalctl --no-pager -o cat -u "$1" --since "$since" | grep -q "$2"; }
+wait_for 15 since_has scout-lowpower "heartbeat lost" || fail "outage not noticed"
+wait_for 60 journal_has fake-rover "link back" || fail "fake rover link not back"
+wait_for 30 since_has scout-lowpower "autopilot regained" || fail "not regained after the outage"
+[ "$(systemctl show -p MainPID --value scout-lowpower)" = "$pid" ] || fail "service restarted"
+wait_for 30 sh -c 'scout-lowpower status | grep -q "\"mode\": \"AUTO\""' || fail "not in AUTO after outage"
+wait_for 60 since_has scout-lowpower "onboard mission matches" || fail "stored mission not kept"
+journalctl --no-pager -u scout-lowpower -u fake-rover --since "$since" -o short-precise \
+  | sed 's/^/  journal: /'
+
 step "systemd restarts the service after kill -9"
 pid="$(systemctl show -p MainPID --value scout-lowpower)"
 systemctl kill -s KILL scout-lowpower

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke-test the debs under real systemd in a throwaway Debian container:
-# install from the apt repository, drive a fake autopilot, survive kill -9,
-# add and purge scout-sim, purge everything. About two minutes. CI runs it.
+# install from the apt repository, drive a fake autopilot, ride out a link
+# outage, survive kill -9, add and purge scout-sim, purge everything. About two minutes. CI runs it.
 #
 #   packaging/build.sh && packaging/test/smoke.sh [DEBS_DIR]   # default dist/debs
 #   KEEP=1 packaging/test/smoke.sh      # leave the container (scout-smoke) running

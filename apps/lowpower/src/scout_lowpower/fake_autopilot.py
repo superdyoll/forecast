@@ -234,18 +234,32 @@ class FakeRover:
             )
 
 
+LINK_OUTAGE_S = 20.0
+
 if __name__ == "__main__":
     # For the deb smoke test: python3 -m scout_lowpower.fake_autopilot [PORT [VOLTS]]
+    # SIGUSR1 drops the link for LINK_OUTAGE_S while the autopilot keeps its
+    # mode, arming and mission: a cable or radio outage, not a reboot.
+    import signal
     import sys
 
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5760
     volts = float(sys.argv[2]) if len(sys.argv) > 2 else 23.0
     rover = FakeRover(port=port, volt=volts).start()
     rover.armed = True
+    outage = threading.Event()
+    signal.signal(signal.SIGUSR1, lambda *_: outage.set())
     print(f"fake rover on tcp:127.0.0.1:{rover.port}", flush=True)
     last = None
     while True:  # log state changes, so the test can read them from the journal
         time.sleep(0.5)
+        if outage.is_set():
+            outage.clear()
+            rover.stop()
+            print(f"link dropped for {LINK_OUTAGE_S:.0f} s (still running)", flush=True)
+            time.sleep(LINK_OUTAGE_S)
+            rover.start()
+            print("link back", flush=True)
         with rover.lock:
             now = f"mode={rover.mode} armed={rover.armed} items={len(rover.mission)}"
         if now != last:
