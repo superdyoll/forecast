@@ -10,6 +10,7 @@ from pathlib import Path
 
 from scout_forecast import clock
 from scout_forecast import energy as E
+from scout_lowpower import current as C
 from scout_lowpower import mavlink as M
 from scout_lowpower import planner as P
 from scout_lowpower import service as S
@@ -42,12 +43,20 @@ class Estimate(unittest.TestCase):
         st = S.Settings(state_dir=Path(self.tmp.name))
         self.svc = S.Service(st, PARAMS)
         self.svc.ap.mode, self.svc.ap.armed = M.MODE_AUTO, True
+        self.svc.action_t = T0 - 3600  # the action began long before the data
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def feed(
-        self, stw, heading_deg, seconds=3600, starlink_first_s=900, ground=None, t0=T0
+        self,
+        stw,
+        heading_deg,
+        seconds=3600,
+        starlink_first_s=900,
+        ground=None,
+        t0=T0,
+        starlink=None,
     ):
         """An hour at 1 Hz of a boat holding `stw` through the water on
         `heading_deg` in CURRENT, Starlink on for the first `starlink_first_s`
@@ -60,7 +69,7 @@ class Estimate(unittest.TestCase):
         for k in range(seconds):
             now = t0 + k
             load = E.load_component(PARAMS, "hotel_w") + E.propulsion_w(PARAMS, stw)
-            if k < starlink_first_s:
+            if starlink(now) if starlink else k < starlink_first_s:
                 load += E.load_component(PARAMS, "starlink_w")
             for msg in (
                 {
@@ -144,6 +153,33 @@ class Estimate(unittest.TestCase):
         now = self.feed(0.5, 270.0, seconds=900, starlink_first_s=225, t0=T0 + 3000)
         self.assertCurrent(self.observe(now, times=80), CURRENT, tol=0.05)
 
+    def test_speed_changes_within_an_action_dont_stop_the_estimate(self):
+        # Overnight run transit-s2: near the deadline the speed changed every
+        # decision; windows restarted at each change would never be long
+        # enough to update the estimate.
+        self.svc.plan = plan("transit", 0.6)
+        now = self.feed(0.6, 0.0)
+        self.svc.plan = plan("transit", 0.7, settled=False)  # changed just now
+        self.assertCurrent(self.observe(now), CURRENT, tol=0.05)
+
+    def test_a_known_starlink_schedule_fixes_short_windows(self):
+        # Overnight run transit-s2: the run starts at 06:00, Starlink's session
+        # is the first 15 min of the hour, so the first windows were all
+        # Starlink-on; at its average duty that read as 16 W of propulsion.
+        # When the service switches Starlink (a relay) it knows its schedule.
+        self.svc.st.starlink_relay = 1
+        self.svc.plan = plan("transit", 0.3)
+        self.svc.action_t = T0 - 120  # the action began with the data
+        period, boat_now = self.svc.st.starlink_period_s, clock.now().timestamp()
+        end = T0 + 599
+
+        def on(mono):  # Starlink by the schedule, at this sample's boat time
+            return C.starlink_on(boat_now - (end - mono), 0.25, period)
+
+        now = self.feed(0.3, 0.0, seconds=600, starlink=on)
+        self.assertEqual(now, end)
+        self.assertCurrent(self.observe(now, times=80), CURRENT, tol=0.03)
+
     def test_nothing_until_the_new_leg_has_settled(self):
         tel = self.svc.tel
         self.svc.plan = plan("transit", 0.5)
@@ -165,7 +201,7 @@ class Estimate(unittest.TestCase):
 
     def test_nothing_learnt_when_it_cant_be_trusted(self):
         cases = {
-            "plan not settled yet": dict(plan=plan("transit", 0.5, settled=False)),
+            "action only just began": dict(plan=plan("transit", 0.5), fresh=True),
             "operator in MANUAL": dict(plan=plan("transit", 0.5), mode=0),
             "holding in LOITER but disarmed": dict(
                 plan=plan("hold"), mode=M.MODE_LOITER, armed=False
@@ -179,7 +215,10 @@ class Estimate(unittest.TestCase):
                 self.svc.plan = c["plan"]
                 self.svc.ap.mode = c.get("mode", self.svc.ap.mode)
                 self.svc.ap.armed = c.get("armed", True)
-                self.observe(self.feed(0.5, 0.0, seconds=700), times=3)
+                now = self.feed(0.5, 0.0, seconds=700)
+                if c.get("fresh"):
+                    self.svc.action_t = now - 60
+                self.observe(now, times=3)
                 self.assertEqual(self.svc.current, (0.0, 0.0))
 
     def test_turning_in_circles_has_no_heading(self):

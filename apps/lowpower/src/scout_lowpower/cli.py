@@ -8,7 +8,7 @@
     scout-lowpower plan --lat 60.2 --lon 2.2 --pct 55        # what-if, no autopilot
 
 Configuration: CLI flags, else environment, else .env (environment wins):
-SCOUT_MAVLINK, SCOUT_STATE_DIR, SCOUT_MISSION, SCOUT_PARAMS.
+SCOUT_MAVLINK, SCOUT_STATE_DIR, SCOUT_MISSION, SCOUT_PARAMS, SCOUT_STARLINK_RELAY.
 """
 
 from __future__ import annotations
@@ -52,7 +52,10 @@ def _settings(a) -> Settings:
         15.0, DECIDE_EVERY_S / clock.rate()
     )
     st.dry_run = bool(getattr(a, "dry_run", False))
-    st.starlink_relay = getattr(a, "starlink_relay", None)
+    relay = getattr(a, "starlink_relay", None)
+    if relay is None and os.environ.get("SCOUT_STARLINK_RELAY"):
+        relay = int(os.environ["SCOUT_STARLINK_RELAY"])
+    st.starlink_relay = relay
     st.rearm = not getattr(a, "no_rearm", False)
     return st
 
@@ -121,7 +124,9 @@ def main(argv=None) -> int:
         help="don't re-arm after an autopilot restart",
     )
     r.add_argument(
-        "--starlink-relay", type=int, help="relay number that powers Starlink"
+        "--starlink-relay",
+        type=int,
+        help="relay number that powers Starlink (default $SCOUT_STARLINK_RELAY)",
     )
 
     sm = sub.add_parser("set-mission", help="write the mission file")

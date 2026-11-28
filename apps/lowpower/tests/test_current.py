@@ -71,6 +71,22 @@ class TopSpeed(unittest.TestCase):
         self.assertEqual(C.learn_top_speed(0.5, 0.6, 0.6, 0.4, False), 0.5)
 
 
+class Starlink(unittest.TestCase):
+    def test_schedule(self):
+        on = [C.starlink_on(t, 0.25, 3600) for t in (0, 899, 900, 3599, 3600)]
+        self.assertEqual(on, [True, True, False, False, True])
+        self.assertFalse(C.starlink_on(10, 0.0, 3600))
+
+    def test_propulsion_known_schedule_vs_average_duty(self):
+        hotel, sl = E.load_component(P, "hotel_w"), E.load_component(P, "starlink_w")
+        # 10 min, Starlink on all of it (the start of its hour), 5 W propelling.
+        loads = [(t, hotel + sl + 5.0) for t in range(0, 600, 10)]
+        self.assertAlmostEqual(C.propulsion_w(P, loads, 0.25, 3600), 5.0)
+        # Without the schedule, a quarter of Starlink is assumed: 16.5 W too much.
+        self.assertAlmostEqual(C.propulsion_w(P, loads, 0.25, None), 5.0 + 0.75 * sl)
+        self.assertIsNone(C.propulsion_w(P, [], 0.25, 3600))
+
+
 class Window(unittest.TestCase):
     def test_a_whole_cycle_when_nothing_changed(self):
         self.assertEqual(C.window_s(10_000, 3600), 3600)

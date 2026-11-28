@@ -133,6 +133,7 @@ def run(a) -> dict:
         current_mean = (0.0, 0.0)
         recent = []  # (t, load W, solar W, ground, heading)
         leg, leg_t = (0, False), start  # (next_wp, at_final) and when it began
+        action_t = start  # when the plan's action last changed
         truth_pct = {}  # minute -> battery reading
         rows, actions = [], {}
         t = start
@@ -174,8 +175,8 @@ def run(a) -> dict:
                 # As the service: a Starlink cycle, not back past the plan's
                 # or the leg's start (current.window_s).
                 span = None
-                if plan and plan.since:
-                    since = (t - max(plan.since, leg_t)).total_seconds()
+                if plan:
+                    since = (t - max(action_t, leg_t)).total_seconds()
                     span = C.window_s(since, 3600.0)
                 win = [r for r in recent if span and (t - r[0]).total_seconds() <= span]
                 if win:
@@ -183,24 +184,21 @@ def run(a) -> dict:
                     hn = sum(math.cos(math.radians(r[4])) for r in win)
                     he = sum(math.sin(math.radians(r[4])) for r in win)
                     heading = math.degrees(math.atan2(he, hn)) % 360  # vector mean
-                    load = sum(r[1] for r in win) / len(win)
+                    # The service switches Starlink here (the power model follows
+                    # its advice), so it knows when Starlink was on.
+                    prop = C.propulsion_w(
+                        params,
+                        [(r[0].timestamp(), r[1]) for r in win],
+                        plan.starlink_duty,
+                        power.t.starlink_period_s,
+                    )
                     # The boat always does what the plan asks: right mode, and
                     # armed exactly when the motors run.
-                    obs = C.observe(
-                        params,
-                        plan.action,
-                        plan.starlink_duty,
-                        True,
-                        motors,
-                        g,
-                        heading,
-                        load,
-                    )
+                    obs = C.observe(params, plan.action, True, motors, g, heading, prop)
                     if obs is not None:
                         current = C.blend(current, obs, 0.3 * span / 3600.0)
                         current_mean = C.blend(current_mean, obs, OBSERVE_S / 86400)
                     if plan.action == "transit" and plan.speed_ms:
-                        prop = load - E.base_load_w(params, plan.starlink_duty)
                         stw_max = C.learn_top_speed(
                             stw_max,
                             plan.speed_ms,
@@ -224,7 +222,10 @@ def run(a) -> dict:
                     current_mean_ms=current_mean if a.estimate_current else (0.0, 0.0),
                     at_final=boat.at_final,
                 )
-                plan = P.decide(s, m, params, prev=plan)
+                new = P.decide(s, m, params, prev=plan)
+                if plan is None or new.action != plan.action:
+                    action_t = t  # as the service: the window starts again
+                plan = new
                 # As if the service switches Starlink with a relay: follow its advice.
                 power.t = replace(power.t, starlink_duty=plan.starlink_duty)
                 actions[plan.action] = actions.get(plan.action, 0) + 1

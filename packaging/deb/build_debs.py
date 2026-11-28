@@ -76,6 +76,8 @@ if [ ! -e /etc/scout/sim.env ]; then
     echo "SCOUT_CLOCK=$(/usr/bin/scout-sim clock --start 2025-07-23T06:00Z)"
     echo "SCOUT_SIM_SITL=tcp:127.0.0.1:5762"
     echo "SCOUT_SIM_POWER_OUT=udpout:127.0.0.1:14601"
+    echo "# The service switches Starlink; scout-sim's power follows its schedule."
+    echo "SCOUT_STARLINK_RELAY=1"
   } > /etc/scout/sim.env
 fi
 """

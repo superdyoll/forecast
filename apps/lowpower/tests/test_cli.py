@@ -22,6 +22,7 @@ ENV = (
     "SCOUT_MISSION",
     "SCOUT_PARAMS",
     "SCOUT_CLOCK",
+    "SCOUT_STARLINK_RELAY",
 )
 
 
@@ -199,6 +200,9 @@ class Settings(unittest.TestCase):
         self.assertEqual(st.state_dir, Path("/var/lib/a"))  # first of systemd's list
         self.assertEqual(st.mavlink, "serial:/dev/ttyACM0:115200")
         self.assertEqual(st.mission_path, Path("/etc/scout/m.json"))
+        self.assertIsNone(st.starlink_relay)
+        os.environ["SCOUT_STARLINK_RELAY"] = "2"
+        self.assertEqual(cli._settings(self.args()).starlink_relay, 2)
         os.environ["SCOUT_STATE_DIR"] = "/srv/scout"
         self.assertEqual(cli._settings(self.args()).state_dir, Path("/srv/scout"))
 

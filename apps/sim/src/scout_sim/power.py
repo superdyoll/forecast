@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scout_forecast import energy as E
+from scout_lowpower import current as C
 
 
 @dataclass
@@ -58,8 +59,10 @@ class PowerModel:
         self.rnd = random.Random(seed)
 
     def starlink_on(self, t: datetime) -> bool:
-        period = self.t.starlink_period_s
-        return (t.timestamp() % period) < self.t.starlink_duty * period
+        # On the service's relay schedule (the service switches Starlink).
+        return C.starlink_on(
+            t.timestamp(), self.t.starlink_duty, self.t.starlink_period_s
+        )
 
     def step(self, t, dt_s, lat, lon, u_water, armed, cloud) -> dict:
         tr = self.t

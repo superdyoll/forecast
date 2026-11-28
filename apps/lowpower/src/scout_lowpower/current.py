@@ -27,27 +27,43 @@ def from_thrust(p: E.Params, ground, heading_deg: float, propulsion_w: float):
     return ground[0] - stw * math.cos(h), ground[1] - stw * math.sin(h)
 
 
+def starlink_on(epoch_s: float, duty: float, period_s: float) -> bool:
+    """Starlink's state on the service's relay schedule: on for the first
+    `duty` of every `period_s`, in boat time. The service switches the relay
+    by it, and the simulators' power models follow it."""
+    return (epoch_s % period_s) < duty * period_s
+
+
+def propulsion_w(
+    p: E.Params, loads, duty: float, period_s: float | None
+) -> float | None:
+    """Mean propulsion power over [(boat epoch s, load W), ...]: the load less
+    hotel and Starlink. With `period_s` (the service switches Starlink, so it
+    knows when it was on) Starlink comes off sample by sample; without, at
+    its average duty, which only averages out over a whole cycle."""
+    if not loads:
+        return None
+    hotel, sl = E.load_component(p, "hotel_w"), E.load_component(p, "starlink_w")
+    if period_s is None:
+        return sum(w for _, w in loads) / len(loads) - E.base_load_w(p, duty)
+    on = [starlink_on(t, duty, period_s) for t, _ in loads]
+    return sum(w - hotel - sl * o for (_, w), o in zip(loads, on)) / len(loads)
+
+
 def observe(
-    p: E.Params,
-    action: str,
-    duty: float,
-    mode_ok: bool,
-    armed: bool,
-    ground,
-    heading_deg,
-    load_w,
+    p: E.Params, action: str, mode_ok: bool, armed: bool, ground, heading_deg, prop_w
 ):
     """One observation of the current from a window of telemetry, or None.
 
     `mode_ok`: the autopilot is in the mode the plan asks for. Motoring
-    (transit in AUTO, hold in LOITER, armed): from the propulsion power,
-    which is the load minus hotel and Starlink at `duty`. Motors off
-    (pause or drift in HOLD, or disarmed): the ground velocity itself.
+    (transit in AUTO, hold in LOITER, armed): from the propulsion power
+    (propulsion_w). Motors off (pause or drift in HOLD, or disarmed): the
+    ground velocity itself.
     """
     if action in ("transit", "hold"):
-        if not (mode_ok and armed) or heading_deg is None or load_w is None:
+        if not (mode_ok and armed) or heading_deg is None or prop_w is None:
             return None
-        return from_thrust(p, ground, heading_deg, load_w - E.base_load_w(p, duty))
+        return from_thrust(p, ground, heading_deg, prop_w)
     if action in ("pause", "drift") and (mode_ok or not armed):
         return tuple(ground)
     return None

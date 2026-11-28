@@ -292,6 +292,11 @@ class Service:
         self.ap = Autopilot()
         self.mission: Mission | None = None
         self.mission_mtime = None
+        # When the plan's action (transit, hold, ...) last changed, monotonic:
+        # the current estimate averages no further back. A speed change
+        # within an action doesn't count: near a deadline the speed can
+        # change every decision, and the estimate would never update.
+        self.action_t = time.monotonic()
         self.plan: P.Plan | None = None
         self.uploaded = None  # signature of the mission items onboard
         self.cloud_obs = []  # [epoch, observed W, clear-sky W], last 24 h
@@ -724,10 +729,10 @@ class Service:
         # Average over a whole Starlink cycle: propulsion = load - hotel -
         # Starlink, and Starlink comes in sessions, so a shorter window can be
         # all-on or all-off (+-15 W, more than the propulsion itself at low
-        # speed). But not back past the plan's start or the current leg's
+        # speed). But not back past the action's start or the current leg's
         # (current.window_s). Telemetry is in real seconds: scale by the rate.
         rate = clock.rate()
-        since = (_now() - pl.since).total_seconds()
+        since = (now - self.action_t) * rate
         if t.leg_t is not None:
             since = min(since, (now - t.leg_t) * rate)
         full = max(600.0, self.st.starlink_period_s)
@@ -738,21 +743,30 @@ class Service:
         ground = t.ground_velocity(window, now)
         if ground is None:
             return
-        load = t.mean(t.load, window, now)
+        # Load samples in boat time, for the Starlink schedule if we switch it.
+        boat_now = _now().timestamp()
+        loads = [
+            (boat_now - (now - ts) * rate, w) for ts, w in t.load if now - ts <= window
+        ]
+        scheduled = self.st.starlink_relay is not None
+        prop = C.propulsion_w(
+            self.params,
+            loads,
+            pl.starlink_duty,
+            self.st.starlink_period_s if scheduled else None,
+        )
         obs = C.observe(
             self.params,
             pl.action,
-            pl.starlink_duty,
             self.ap.mode == PLAN_MODES.get(pl.action),
             self.ap.armed,
             ground,
             t.mean_heading(window, now),
-            load,
+            prop,
         )
         if obs is None:
             return
         if pl.action == "transit" and pl.speed_ms and self.ap.armed:
-            prop = load - E.base_load_w(self.params, pl.starlink_duty)
             self.stw_max = C.learn_top_speed(
                 self.stw_max,
                 pl.speed_ms,
@@ -816,6 +830,9 @@ class Service:
             return
         new = P.decide(s, self.mission, self.params, self.cfg, prev=self.plan)
         changed = not new.same_control(self.plan)
+        old = self.plan
+        if old is None or (old.action, old.mission_id) != (new.action, new.mission_id):
+            self.action_t = now  # the current estimate's window starts again
         self.plan = new
         msg = (
             f"plan: {new.action}"
@@ -901,9 +918,9 @@ class Service:
         if pl.action in ("hold", "drift") and self._every("loiter_radius", 3600.0, now):
             self._param("LOIT_RADIUS", self.mission.radius_m)
         if self.st.starlink_relay is not None and self._every("relay", 60.0, now):
-            period = self.st.starlink_period_s  # boat seconds, as power.py
-            phase = (_now().timestamp() % period) / period
-            on = phase < pl.starlink_duty
+            on = C.starlink_on(
+                _now().timestamp(), pl.starlink_duty, self.st.starlink_period_s
+            )
             self._command(
                 M.MAV_CMD_DO_SET_RELAY, self.st.starlink_relay, 1 if on else 0
             )

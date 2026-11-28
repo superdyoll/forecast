@@ -62,7 +62,8 @@ esac
 "$PYTHON" -m scout_sim.run run --arm --pct0 "$SIM_PCT0" --seed "$SIM_SEED" \
   ${storm[@]+"${storm[@]}"} --truth "$SIM_WORK/sim-truth.jsonl" \
   >"$SIM_WORK/sim.log" 2>&1 & pids+=($!)
-"$PYTHON" -m scout_lowpower run --power-link udpin:0.0.0.0:14601 \
+# The service switches Starlink (relay 1): scout-sim's power follows its schedule.
+"$PYTHON" -m scout_lowpower run --power-link udpin:0.0.0.0:14601 --starlink-relay 1 \
   >"$SIM_WORK/lowpower.log" 2>&1 & pids+=($!)
 "$PYTHON" -m scout_web >"$SIM_WORK/web.log" 2>&1 & pids+=($!)
 echo "running: sim, lowpower, web http://127.0.0.1:${SCOUT_WEB_PORT:-8080}"
