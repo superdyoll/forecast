@@ -165,6 +165,13 @@ against the readings that followed.
 - **Autopilot killed mid-mission:** it saw the heartbeat loss at +5 s and the link
   back at +16 s. It kept the stored mission and re-armed at +20 s. AUTO was accepted
   at +61 s, once ArduPilot's EKF was ready. The service itself never restarted.
+- **Link dropped, autopilot still running** (`link-outage.journal.txt`, the
+  deb smoke test's fake rover): the link connected but carried nothing at
+  first, so the service retried the resync and its upload. It saw the
+  heartbeat lost at +11 s (not +5 s: the upload's retries held the loop for
+  6 s) and regained AUTO at +20 s. At +31 s it resynced,
+  found the stored mission unchanged and kept it, then resumed its plan. It
+  never restarted.
 - **`kill -9` of the service:** systemd restarted it in 5 s.
 - **A hung service (`SIGSTOP`):** the 30 s watchdog restarted it.
 
