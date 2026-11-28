@@ -8,4 +8,4 @@ ArduPilot over MAVLink. Standard library plus the scout-forecast energy model.
   cli      - the `scout-lowpower` command (run, set-mission, status, plan)
 """
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
