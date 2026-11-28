@@ -2,6 +2,8 @@
 
 Battery forecast and low-power mission mode for Scout, a solar-electric robot
 boat. Standard library only (Python 3.9+), so it runs on the boat's computer.
+The one-page write-up is [WRITEUP.md](WRITEUP.md); the full report, with how
+every figure was made, is [REPORT.md](REPORT.md).
 
 ## Quick start
 
