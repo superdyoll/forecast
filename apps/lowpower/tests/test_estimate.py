@@ -122,22 +122,25 @@ class Estimate(unittest.TestCase):
         self.assertCurrent(self.observe(now), CURRENT)
 
     def test_top_speed_learnt_when_the_boat_cant_make_its_command(self):
-        # Asked for 1.2 m/s over ground; flat out (0.82 through the water,
-        # ~65 W) it makes ~0.87.
-        self.svc.plan = plan("transit", 1.2)
-        now = self.feed(0.82, 0.0)
+        # Asked for 1.0 m/s over ground; it makes ~0.58 at 0.5 through the water.
+        self.svc.plan = plan("transit", 1.0)
+        now = self.feed(0.5, 0.0)
         self.observe(now, times=1)
-        self.assertAlmostEqual(self.svc.stw_max, 0.82, delta=0.02)
+        self.assertAlmostEqual(self.svc.stw_max, 0.5, delta=0.02)
 
-    def test_no_top_speed_learnt_from_a_slow_start(self):
-        # Regression (overnight SITL run transit-s1): the boat at rest for the
-        # first half hour, then under way at 0.3 m/s through the water. Short
-        # of a 0.7 command, but at a few watts: not the hull's limit.
+    def test_no_top_speed_learnt_from_the_start_before_arming(self):
+        # Regression (overnight SITL run transit-s1): disarmed in MANUAL at
+        # first, then armed in AUTO making its 0.7 m/s command over ground
+        # (0.63 through the water, north, in the 0.3 m/s east current). A
+        # window reaching back to the start averaged in the boat at rest,
+        # read too little over ground and learnt a 0.40 m/s top speed.
         self.svc.plan = plan("transit", 0.7)
         self.feed(0.0, 0.0, seconds=1800, ground=(0.0, 0.0))
-        now = self.feed(0.3, 0.0, seconds=1800, t0=T0 + 1800)
+        self.svc.ap.changed_t = T0 + 1800  # armed and in AUTO from here
+        now = self.feed(0.63, 0.0, seconds=1800, t0=T0 + 1800)
         self.observe(now, times=5)
         self.assertIsNone(self.svc.stw_max)
+        self.assertCurrent(self.svc.current, CURRENT, tol=0.15)  # converging
 
     def test_after_a_turn_only_the_new_leg_counts(self):
         # Regression (transit-s1, 08:15): the hour before a turn mixed two

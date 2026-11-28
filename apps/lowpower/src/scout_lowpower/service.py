@@ -205,6 +205,7 @@ class Autopilot:
         self.mode = None
         self.armed = False
         self.boot_ms = None
+        self.changed_t = None  # monotonic time mode or arming last changed
         self.online = False
         self.restarted_at = None
         # Set on (re)connect until the next boot clock arrives: until then a
@@ -230,8 +231,11 @@ class Autopilot:
             gap = None if self.last_hb is None else now - self.last_hb
             self.sysid, self.compid = msg["_sysid"], msg["_compid"]
             self.last_hb = now
-            self.mode = msg["custom_mode"]
-            self.armed = bool(msg["base_mode"] & M.MAV_MODE_FLAG_SAFETY_ARMED)
+            mode = msg["custom_mode"]
+            armed = bool(msg["base_mode"] & M.MAV_MODE_FLAG_SAFETY_ARMED)
+            if (mode, armed) != (self.mode, self.armed):
+                self.changed_t = now  # the current estimate's window restarts
+            self.mode, self.armed = mode, armed
             if not self.online:
                 self.online = True
                 events.append("online" if gap is None else "regained")
@@ -733,8 +737,9 @@ class Service:
         # (current.window_s). Telemetry is in real seconds: scale by the rate.
         rate = clock.rate()
         since = (now - self.action_t) * rate
-        if t.leg_t is not None:
-            since = min(since, (now - t.leg_t) * rate)
+        for changed in (t.leg_t, self.ap.changed_t):
+            if changed is not None:
+                since = min(since, (now - changed) * rate)
         full = max(600.0, self.st.starlink_period_s)
         span = C.window_s(since, full)
         if span is None:
@@ -772,7 +777,6 @@ class Service:
                 pl.speed_ms,
                 math.hypot(*ground),
                 E.stw_for_power(self.params, prop),
-                prop >= C.FULL_POWER * E.max_propulsion_w(self.params),
             )
         # A window shorter than a Starlink cycle is noisier: weigh it less.
         self.current = C.blend(self.current, obs, 0.3 * span / full)

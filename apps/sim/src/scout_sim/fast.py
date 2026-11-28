@@ -204,7 +204,6 @@ def run(a) -> dict:
                             plan.speed_ms,
                             math.hypot(*g),
                             E.stw_for_power(params, prop),
-                            prop >= C.FULL_POWER * E.max_propulsion_w(params),
                         )
             if k % (DECIDE_S // STEP_S) == 0:
                 cloud = C.cloud_factor(cloud_obs)
