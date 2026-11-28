@@ -136,14 +136,27 @@ protected, add a `RELEASE_TOKEN` secret that may push to it.
 
 The simulator is the boat install plus one package, `scout-sim`. It needs
 docker (apt installs `docker.io` if no docker is present) and runs ArduPilot
-Rover SITL in a container, which it pulls on first run. Use an x86-64 machine;
-on arm64 also `apt install qemu-user-static binfmt-support` (the SITL image is
-x86-64 only).
+Rover SITL in a container, which it pulls on first run.
+
+**The SITL image is x86-64 only.** On an arm64 machine (a Raspberry Pi, a
+Graviton instance, or an Ubuntu VM on Apple silicon) it runs under qemu.
+`scout-sim` recommends `qemu-user-static`, so a plain `apt install` brings it,
+but not with `--no-install-recommends` or when it's already missing. Check
+before installing:
+
+```sh
+uname -m                                       # x86_64: nothing to do
+sudo apt install qemu-user-static              # arm64: x86-64 emulation
+ls /proc/sys/fs/binfmt_misc/ | grep x86_64     # should list qemu-x86_64
+```
+
+Emulated SITL manages about 5× real time at most, so keep `SCOUT_CLOCK`'s rate
+at 5 or below there (see below).
 
 ```sh
 # with $repo, $tag and $version set as in "Install on the boat":
 curl -fsSLO "$repo/releases/download/$tag/scout-sim_${version}_all.deb"
-sudo apt install ./scout*_"$version"_all.deb  # boat packages + scout-sim (+ docker.io)
+sudo apt install ./scout*_"$version"_all.deb  # boat packages + scout-sim (+ docker.io, qemu-user-static)
 journalctl -u scout-sitl -f                   # first run: pulls the SITL image (several GB
                                               # unpacked), then "starting SITL x1"; Ctrl-C
 sudo -u scout scout-lowpower set-mission \
@@ -154,9 +167,10 @@ xdg-open http://127.0.0.1:8080                # updates itself every few seconds
 Installing `scout-sim` puts the boat services on a simulated clock (July sun
 at 60 N, starting 06:00Z) from `/etc/scout/sim.env`, and starts `scout-sitl`
 (SITL in docker) and `scout-sim` (sea, sky and power). `--arrive-in` is on that
-clock. To run 20x faster (about 4 simulated hours in 12 minutes), start the
-clock again at the new rate; SITL is recreated to match, and the service then
-decides every 15 s instead of every 5 min:
+clock. To run 20x faster (about 4 simulated hours in 12 minutes; on arm64 use
+5, the most emulated SITL keeps up with), start the clock again at the new
+rate. SITL is recreated to match, and the service then decides every 15 s
+instead of every 5 min:
 
 ```sh
 sudo sed -i "s|^SCOUT_CLOCK=.*|SCOUT_CLOCK=$(scout-sim clock --start 2025-07-23T06:00Z --rate 20)|" /etc/scout/sim.env
@@ -165,6 +179,15 @@ sudo systemctl restart scout-sitl scout-sim scout-lowpower scout-web
 sudo -u scout scout-lowpower set-mission \
   --transit 60.215,2.210 60.230,2.240 60.240,2.200 --arrive-in 4 --reserve 30
 ```
+
+**If `scout-sitl` fails,** `journalctl -u scout-sitl` says why, and systemd
+stops retrying until you've fixed it:
+- **"can't run the x86-64 SITL image: no x86-64 emulation"** (older releases:
+  `exec format error`): install `qemu-user-static` as above, then `sudo systemctl
+  restart scout-sitl`.
+- **"docker is not installed":** `sudo apt install docker.io`, then restart it.
+- **"the docker daemon isn't running":** `sudo systemctl start docker`. It
+  keeps retrying meanwhile.
 
 `sudo apt purge scout-sim` puts the services back on the real clock and
 removes the SITL container (`docker image rm radarku/ardupilot-sitl` frees the

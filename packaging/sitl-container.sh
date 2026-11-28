@@ -19,22 +19,26 @@ rate="${rate##*x}"
 case "$rate" in '' | *[!0-9.]*) rate=1 ;; esac
 
 die() { echo "scout-sitl: $*" >&2; exit 1; }
-command -v docker >/dev/null || die "docker is not installed (apt install docker.io)"
+# Can't work until someone changes the machine: exit 78 (EX_CONFIG), which
+# scout-sitl.service doesn't restart on (RestartPreventExitStatus).
+fatal() { echo "scout-sitl: $*" >&2; exit 78; }
+command -v docker >/dev/null || fatal "docker is not installed (apt install docker.io)"
 docker info >/dev/null 2>&1 || die "the docker daemon isn't running or reachable (systemctl start docker)"
 
 if ! docker image inspect "$image" >/dev/null 2>&1; then
   echo "first run: pulling $image (linux/amd64); this can take a few minutes"
   docker pull --platform linux/amd64 "$image"
 fi
-# The image is x86-64 only. Elsewhere the kernel needs x86-64 emulation.
-emulated=""
-for f in /proc/sys/fs/binfmt_misc/*; do
-  case "${f##*/}" in *x86*64* | *X86*64* | *rosetta*) emulated=1 ;; esac
-done
-# (Linux only: Docker Desktop on macOS emulates it inside its own VM.)
-if [ "$(uname -s)" = Linux ] && [ "$(uname -m)" != x86_64 ] && [ -z "$emulated" ]; then
-  echo "warning: no x86-64 emulation registered; if SITL fails with 'exec format error'," \
-    "apt install qemu-user-static binfmt-support" >&2
+# The image is x86-64 only. Elsewhere the kernel needs x86-64 emulation
+# (qemu-user-static registers it with binfmt_misc). Try it rather than guess
+# from handler names: without it every start fails with "exec format error".
+if [ "$(uname -m)" != x86_64 ] \
+  && ! out="$(docker run --rm --platform linux/amd64 --entrypoint /bin/true "$image" 2>&1)" \
+  && echo "$out" | grep -q "exec format error"; then
+  fatal "this $(uname -m) machine can't run the x86-64 SITL image: no x86-64 emulation." \
+    "Install it (sudo apt install qemu-user-static), check that" \
+    "/proc/sys/fs/binfmt_misc/qemu-x86_64 exists, then sudo systemctl restart scout-sitl." \
+    "Emulated SITL manages about 5x real time at most."
 fi
 
 if docker container inspect "$name" >/dev/null 2>&1; then

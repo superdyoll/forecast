@@ -16,6 +16,8 @@ ExecStart=/usr/share/scout-sim/sitl-container.sh
 ExecStop=/usr/bin/env docker stop -t 5 scout-sitl
 Restart=always
 RestartSec=3
+# 78: the machine can't run SITL (no docker, no x86-64 emulation): fix, then restart.
+RestartPreventExitStatus=78
 
 [Install]
 WantedBy=multi-user.target

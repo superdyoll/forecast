@@ -161,6 +161,12 @@ work around them a second time downstream.
 - Right after arming, SITL briefly reports "EKF variance / EKF failsafe" and may
   reject one mode change; it clears within seconds and the service retries.
 - Message intervals are per MAVLink link: each client requests its own streams.
+- **On arm64 Linux the SITL image needs qemu** (`qemu-user-static`, which the
+  `scout-sim` deb recommends). Without it every start is "exec format
+  error". `sitl-container.sh` tries the image once and exits 78 with what to
+  install, and `scout-sitl.service` doesn't restart on 78
+  (`packaging/tests`, `SitlContainer`). The deb smoke test must keep
+  `--no-install-recommends`, so qemu never registers binfmt in the Docker VM.
 - **Emulated SITL (arm64) runs at ~5.5x at most.** A faster `SCOUT_CLOCK` makes the
   boat lag the clock (arrivals look late, speeds look low); `scout-sim` warns.
   Measure with `time_boot_ms` on port 5763 while reading continuously (a client that
