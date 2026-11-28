@@ -63,6 +63,17 @@ reasons go to journald and the web page.
   autopilot returns it resyncs, checks the stored mission and re-arms
   (journals in `docs/evidence/`).
 
+**Rolling it out:** one boat first. Run it on deck, then for a whole mission
+in advisory mode (`SCOUT_DRY_RUN=1`: it decides and logs but commands
+nothing), then in control with a generous reserve and the operator on watch.
+After that, more boats one at a time, with versions held per boat. To roll
+back:
+- switch the autopilot to MANUAL: the service backs off at once;
+- or `systemctl stop scout-lowpower`: ArduPilot keeps its stored mission;
+- or downgrade the debs with apt.
+
+Steps in the [README](README.md#rolling-out-to-one-boat-first-and-rolling-back).
+
 **What we chose not to build:**
 - weather or ocean forecasts. Positions and dates are shifted, so the public
   data can't be matched to this deployment; cloud and current are inferred

@@ -23,6 +23,7 @@ ENV = (
     "SCOUT_PARAMS",
     "SCOUT_CLOCK",
     "SCOUT_STARLINK_RELAY",
+    "SCOUT_DRY_RUN",
 )
 
 
@@ -205,6 +206,11 @@ class Settings(unittest.TestCase):
         self.assertEqual(cli._settings(self.args()).starlink_relay, 2)
         os.environ["SCOUT_STATE_DIR"] = "/srv/scout"
         self.assertEqual(cli._settings(self.args()).state_dir, Path("/srv/scout"))
+        self.assertFalse(st.dry_run)
+        os.environ["SCOUT_DRY_RUN"] = "0"
+        self.assertFalse(cli._settings(self.args()).dry_run)
+        os.environ["SCOUT_DRY_RUN"] = "1"
+        self.assertTrue(cli._settings(self.args()).dry_run)
 
     def test_flags_win(self):
         os.environ["SCOUT_MAVLINK"] = "tcp:x:1"
