@@ -197,5 +197,90 @@ class Debs(unittest.TestCase):
             self.assertIn(hashlib.sha256(gz).hexdigest(), release)
 
 
+FAKE_DOCKER = """#!/bin/sh
+echo "$*" >> "$FAKE_LOG"
+case "$1 $2" in
+  "info "*|"image inspect") exit 0 ;;
+  "container inspect") exit 1 ;;  # no container yet
+esac
+case "$*" in
+  *"--entrypoint /bin/true"*)
+    [ "$FAKE_EMULATION" = 1 ] && exit 0
+    echo "exec /bin/true: exec format error" >&2; exit 1 ;;
+esac
+exit 0
+"""
+FAKE_UNAME = """#!/bin/sh
+case "$1" in -m) echo "$FAKE_ARCH" ;; *) echo Linux ;; esac
+"""
+
+
+class SitlContainer(unittest.TestCase):
+    """sitl-container.sh (scout-sitl.service) against a stub docker. Fresh
+    arm64 Ubuntu: the x86-64 SITL image failed with "exec format error" and
+    systemd restarted it forever behind a warning."""
+
+    def run_script(self, arch, emulation=False, docker=True):
+        with tempfile.TemporaryDirectory() as d:
+            bin_ = Path(d)
+            stubs = {"uname": FAKE_UNAME, **({"docker": FAKE_DOCKER} if docker else {})}
+            for name, text in stubs.items():
+                (bin_ / name).write_text(text)
+                (bin_ / name).chmod(0o755)
+            for tool in ("dirname", "grep"):  # all it needs besides the stubs
+                (bin_ / tool).symlink_to(shutil.which(tool))
+            log = bin_ / "calls.log"
+            log.touch()
+            env = {
+                "PATH": str(bin_),  # so a real docker on the machine can't be found
+                "FAKE_LOG": str(log),
+                "FAKE_ARCH": arch,
+                "FAKE_EMULATION": "1" if emulation else "0",
+                "SCOUT_SITL_PARM_DIR": d,
+            }
+            r = subprocess.run(
+                [shutil.which("bash"), str(PACKAGING / "sitl-container.sh")],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            return r, log.read_text()
+
+    def test_no_emulation_stops_with_what_to_install(self):
+        r, calls = self.run_script("aarch64")
+        self.assertEqual(r.returncode, 78)
+        self.assertIn("sudo apt install qemu-user-binfmt", r.stderr)
+        self.assertIn("sudo apt install qemu-user-static", r.stderr)  # older releases
+        self.assertNotIn("--name scout-sitl", calls)  # SITL never started
+
+    def test_with_emulation_sitl_starts(self):
+        r, calls = self.run_script("aarch64", emulation=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--name scout-sitl", calls)
+
+    def test_x86_64_needs_no_check(self):
+        r, calls = self.run_script("x86_64")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("/bin/true", calls)
+        self.assertIn("--name scout-sitl", calls)
+
+    def test_no_docker_stops_too(self):
+        r, _ = self.run_script("x86_64", docker=False)
+        self.assertEqual(r.returncode, 78)
+        self.assertIn("docker is not installed", r.stderr)
+
+    def test_the_unit_doesnt_restart_on_it_and_the_deb_brings_qemu(self):
+        unit = (PACKAGING / "systemd/scout-sitl.service").read_text()
+        self.assertIn("RestartPreventExitStatus=78", unit)
+        b = load(PACKAGING / "deb/build_debs.py", "build_debs_sitl")
+        # qemu 10+ (Debian 13, Ubuntu 25.10+): qemu-user-static is only a
+        # virtual name ("no installation candidate"); before 10, the dynamic
+        # qemu-user-binfmt can't run inside docker.
+        self.assertEqual(
+            b.PACKAGES["scout-sim"]["recommends"],
+            ["qemu-user-binfmt (>= 1:10) | qemu-user-static"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

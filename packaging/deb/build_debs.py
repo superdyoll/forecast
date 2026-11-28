@@ -146,6 +146,14 @@ PACKAGES = {
             "scout-lowpower (= {v})",
             "docker.io | docker-ce",
         ],
+        # The SITL image is x86-64 only: elsewhere it runs under qemu, which
+        # docker needs static and registered with binfmt's F flag. From qemu
+        # 10 (Debian 13, Ubuntu 25.10+) that's qemu-user-binfmt, and
+        # qemu-user-static is only a virtual or transitional name; before, the
+        # older qemu-user-binfmt is dynamic and only qemu-user-static works.
+        # Debs are Architecture: all, so this can't be arm64-only; on x86-64
+        # it's a small, unused package.
+        recommends=["qemu-user-binfmt (>= 1:10) | qemu-user-static"],
         description="Scout simulation around ArduPilot SITL (not for the boat)",
         units=["scout-sitl.service", "scout-sim.service"],
         # SITL pulls and runs a docker image: only start it where docker exists.

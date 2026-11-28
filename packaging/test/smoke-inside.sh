@@ -123,6 +123,8 @@ mkdir -p /tmp/fake-docker/DEBIAN
 printf 'Package: docker.io\nVersion: 0~smoke\nArchitecture: all\nMaintainer: smoke <smoke@invalid>\nDescription: stand-in for the smoke test\n' \
   > /tmp/fake-docker/DEBIAN/control
 dpkg-deb -b /tmp/fake-docker /tmp/fake-docker.deb >/dev/null && dpkg -i /tmp/fake-docker.deb >/dev/null
+# --no-install-recommends: never qemu-user-static here. Its postinst
+# registers binfmt handlers in the shared Docker VM's kernel (see AGENTS.md).
 apt_quiet install --no-install-recommends scout-sim
 [ -f /etc/scout/sim.env ] || fail "no /etc/scout/sim.env"
 systemctl show -p DropInPaths scout-lowpower | grep -q scout-sim.conf || fail "no drop-in"
