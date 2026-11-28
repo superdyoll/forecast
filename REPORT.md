@@ -62,6 +62,40 @@ environment, power truth and planner without SITL.
 Propulsion is the strongest lever: going from 0.56 to 1.02 m/s over ground takes
 about 3.5× the power.
 
+**How wind and current move it, from the telemetry alone**
+(`scripts/telemetry-drift.py`):
+
+| Measure | Value | Source |
+| --- | --- | --- |
+| Drift with no propulsion | median 0.29 m/s (p10 0.04, p90 0.72); mean 0.20 m/s toward 135° | 15-min means of speed and course over ground; Starlink rows in MANUAL with the load ≤ 36 W (hotel + Starlink, no thrust). 17 h over 10 days. |
+| Cross-track drift under way | course differs from heading by a median 16° (p90 48°): 0.26 m/s across the track (p90 0.63) | AUTO, 4,722 Starlink rows above 0.3 m/s |
+| Drift along the track | at the same 55–75 W, speed over ground spans 0.52–1.35 m/s (p10–p90, median 0.94) | AUTO, 479 rows |
+
+So drift is about a third of the boat's own speed, and decides whether a
+given power gets it to a waypoint in time. That's why the planner thinks in speed through the
+water and the service estimates the current on board, from its measured
+propulsion power (see [Current](#current-speed-over-ground-vs-through-the-water)).
+
+The telemetry can't go further:
+- **No tide.** The drift samples are Starlink sessions scattered over 10
+  days, and a 12.42 h tide fitted to them explains 2 % of the variance.
+- **No split between wind leeway and current.** There's no wind sensor.
+
+**The public weather and ocean data isn't used.** The brief's positions and dates
+are shifted, so Copernicus currents or ERA5 and Open-Meteo wind and cloud can't
+be matched to this deployment. Joining them would add numbers that look
+precise but have nothing to do with what the boat met. The forecast instead
+learns cloud from the boat's own solar readings, and the service learns the
+current from its own power and motion. The simulator's sea is set to the same
+range as the telemetry, not to a weather product:
+- a mean current of 0.08 m/s;
+- a 0.25 m/s tidal ellipse;
+- 3 % wind leeway, about 0.18 m/s at 6 m/s of wind;
+- storms at 20 m/s.
+
+On the boat, a forecast for its real position (MET Norway or ECMWF over
+Starlink) would be the first addition (see [Storms](#storms)).
+
 ## Forecast models
 
 The **physical model** (`apps/forecast/.../energy.py`, standard library only)

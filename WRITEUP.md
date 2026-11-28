@@ -9,7 +9,10 @@ idle "hotel" load **9.9 W** (not under way, no Starlink session); Starlink
 **+60 W** at cruise, flattening at **~73 W** (~0.85 m/s through the water);
 MODE_17 **+4.5 W**; losses **~2 W** (solar − load − battery). Solar averages
 **72 W** when producing, peaking at **285 W**. Propulsion grows with the cube
-of speed, so speed is the main lever, then Starlink.
+of speed, so speed is the main lever, then Starlink. Drift moves it at a
+median **0.29 m/s** with the motors off (p90 0.72), and **0.26 m/s** across the
+track under way (heading against course), about a third of its own speed
+(`scripts/telemetry-drift.py`).
 
 **What surprised us in the data, and what we did:**
 - `battery_pct` is exactly 20 × V − 400: a voltage, not stored energy. It sags
