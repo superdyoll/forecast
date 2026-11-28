@@ -207,6 +207,15 @@ class Estimate(unittest.TestCase):
         self.observe(self.feed(0.5, 0.0), times=1)
         self.assertIsNone(self.svc.stw_max)
 
+    def test_holding_station_reads_the_current_from_the_thrust(self):
+        # Regression (overnight SITL run station): the service holds station
+        # in AUTO (the mission ends in LOITER_UNLIM) but only trusted
+        # observations in LOITER, so it never estimated the current there.
+        self.svc.plan = plan("hold")
+        # Stemming the current: holding ground, heading into it (west).
+        now = self.feed(math.hypot(*CURRENT), 270.0, ground=(0.0, 0.0))
+        self.assertCurrent(self.observe(now), CURRENT, tol=0.05)
+
     def test_drifting_reads_the_current_off_the_ground_velocity(self):
         self.svc.plan = plan("drift")
         self.svc.ap.mode = M.MODE_HOLD
@@ -217,8 +226,9 @@ class Estimate(unittest.TestCase):
         cases = {
             "action only just began": dict(plan=plan("transit", 0.5), fresh=True),
             "operator in MANUAL": dict(plan=plan("transit", 0.5), mode=0),
-            "holding in LOITER but disarmed": dict(
-                plan=plan("hold"), mode=M.MODE_LOITER, armed=False
+            "holding but disarmed": dict(plan=plan("hold"), armed=False),
+            "holding in LOITER, not the station's AUTO": dict(
+                plan=plan("hold"), mode=M.MODE_LOITER
             ),
             "drift plan, armed in AUTO": dict(plan=plan("drift"), mode=M.MODE_AUTO),
         }

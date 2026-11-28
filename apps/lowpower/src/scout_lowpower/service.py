@@ -52,12 +52,6 @@ SERVICE_MODES = (M.MODE_AUTO, M.MODE_HOLD, M.MODE_LOITER)
 # The mode each action settles in. Transit (AUTO) and station-keeping
 # (LOITER: AUTO reaching the final loiter item) both motor; in LOITER the boat
 # points into the current, so the same estimate applies.
-PLAN_MODES = {
-    "transit": M.MODE_AUTO,
-    "hold": M.MODE_LOITER,
-    "pause": M.MODE_HOLD,
-    "drift": M.MODE_HOLD,
-}
 HEARTBEAT_TIMEOUT_S = 5.0
 REBOOT_GRACE_S = 60.0  # after a restart, the autopilot's own mode isn't an override
 # After a reconnect, how long to wait for the boot clock (GLOBAL_POSITION_INT)
@@ -765,7 +759,7 @@ class Service:
         obs = C.observe(
             self.params,
             pl.action,
-            self.ap.mode == PLAN_MODES.get(pl.action),
+            self.ap.mode == self._desired_mode(),
             self.ap.armed,
             ground,
             t.mean_heading(window, now),
