@@ -228,8 +228,9 @@ class Model(unittest.TestCase):
 # Saved decisions: (description, BoatState kwargs, mission, expected).
 # min_pct is checked to within half a point; update deliberately, with the
 # reason in the commit, when the planner or the shipped fit is meant to change.
-# (Last: the refit of run 20261127T233027Z moved the lows by 0.3-1.8 points;
-# every action and speed stayed.)
+# (Refit of run 20261127T233027Z: lows moved 0.3-1.8 points, actions and
+# speeds stayed. _top_command: the calm transit asks for 1.2 m/s, not 0.9:
+# both are beyond the 0.85 m/s top speed, same outcome.)
 T0 = datetime(2025, 7, 23, 6, tzinfo=timezone.utc)
 ROUTE = [[60.30, 2.20], [60.50, 2.20]]
 SAVED = [
@@ -237,7 +238,7 @@ SAVED = [
         "calm transit, no deadline",
         dict(battery_pct=80),
         dict(kind="transit", waypoints=ROUTE),
-        ("transit", 0.9, 0.25, 63.1),
+        ("transit", 1.2, 0.25, 63.1),
     ),
     (
         "transit with a 30 h deadline",

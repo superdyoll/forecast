@@ -147,7 +147,9 @@ class Current(unittest.TestCase):
         fast = decide(state(95), m, PARAMS)
         slow_hull = decide(state(95, stw_max_ms=0.3), m, PARAMS)
         self.assertGreater(slow_hull.eta, fast.eta)
-        self.assertLessEqual(slow_hull.speed_ms, 0.3)
+        # Every command from 0.3 up is the same for a 0.3 m/s hull; going
+        # fastest it asks for the most (_top_command) in case 0.3 is too low.
+        self.assertEqual(slow_hull.speed_ms, max(Config().speeds_ms))
 
     def test_strong_tidal_current_keeps_going_because_it_eases(self):
         # Against 1 m/s now (faster than the boat), but a tide with mean ~0:
@@ -330,6 +332,26 @@ class DeadlineReasons(unittest.TestCase):
         self.assertIn(
             "deadline can't be met without going below 35%", " ".join(p.reasons)
         )
+
+
+class TopCommand(unittest.TestCase):
+    """Overnight SITL run transit-s3: with a learnt top speed of 0.54 m/s,
+    every command from 0.5 up looked the same and the planner kept the lowest
+    (0.5), so the boat could never show that it was faster than believed."""
+
+    def test_going_fastest_commands_the_highest_equivalent_speed(self):
+        late = transit(arrive_by=T0 + timedelta(hours=2))  # can't be met
+        p = decide(state(90, stw_max_ms=0.5), late, PARAMS)
+        self.assertEqual(p.action, "transit")
+        self.assertEqual(p.speed_ms, max(Config().speeds_ms))
+        free = decide(state(95, stw_max_ms=0.5), transit(), PARAMS)
+        self.assertEqual(free.speed_ms, max(Config().speeds_ms))
+
+    def test_economy_still_takes_the_lowest(self):
+        # With a deadline it can meet, the slowest command that makes it.
+        m = transit(arrive_by=T0 + timedelta(hours=30))
+        p = decide(state(60, stw_max_ms=0.5), m, PARAMS)
+        self.assertLessEqual(p.speed_ms, 0.5)
 
 
 class Geometry(unittest.TestCase):

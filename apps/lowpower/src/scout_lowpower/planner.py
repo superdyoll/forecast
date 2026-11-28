@@ -208,9 +208,8 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
             f"(top speed through the water {stw_max:.2f} m/s)"
         )
     for duty in (cfg.starlink_duty_normal, cfg.starlink_duty_min):
-        opts = _distinct(
-            [_transit_option(s, m, p, cfg, v, duty, route) for v in cfg.speeds_ms]
-        )
+        every = [_transit_option(s, m, p, cfg, v, duty, route) for v in cfg.speeds_ms]
+        opts = _distinct(every)
         moving = [o for o in opts if math.isfinite(o.hours_to_go)]
         if not moving:
             # No speed makes headway. Motoring flat out loses the least ground
@@ -247,7 +246,7 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
             else:
                 comfy = [o for o in on_time if o.min_pct >= line + cfg.comfort_pct]
                 if comfy:
-                    best = max(comfy, key=lambda o: o.speed)
+                    best = _top_command(max(comfy, key=lambda o: o.speed), every)
                     why = (
                         f"no deadline and energy to spare: fastest speed "
                         f"({best.speed:.1f} m/s) keeping the low point at "
@@ -260,7 +259,7 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
                         for o in on_time
                         if o.min_pct >= top - cfg.economy_tolerance_pct
                     ]
-                    best = max(near, key=lambda o: o.speed)
+                    best = _top_command(max(near, key=lambda o: o.speed), every)
                     why = (
                         f"energy is tight: fastest speed within "
                         f"{cfg.economy_tolerance_pct:.0f} points of the most "
@@ -272,7 +271,7 @@ def _decide_transit(s, m, p, cfg, prev, line, reasons) -> Plan:
             _note_min_duty(reasons, duty, cfg)
             return _plan(best, s, m, line, reasons, prev, cfg)
         if feasible:  # can't make the deadline without breaching the reserve
-            best = max(feasible, key=lambda o: o.speed)
+            best = _top_command(max(feasible, key=lambda o: o.speed), every)
             if deadline_h <= 0:
                 why = f"the deadline passed {max(0.0, -deadline_h):.1f} h ago"
             elif not any(o.hours_to_go <= deadline_h for o in opts):
@@ -378,6 +377,24 @@ def _distinct(opts):
         if not same:
             out.append(o)
     return out
+
+
+def _top_command(best, every):
+    """When going as fast as is safe: of the commands the model can't tell
+    apart from `best` (beyond the hull's believed top speed they all give
+    the same), the highest. If the belief is right ArduPilot saturates and
+    nothing changes; if it's too low, the boat goes faster, and the service
+    sees it and raises the belief. Commanding the lowest of them (overnight
+    SITL run transit-s3, 0.5 m/s against a learnt 0.54 m/s top speed) never
+    finds out."""
+    same = [
+        o
+        for o in every
+        if math.isfinite(o.hours_to_go)
+        and abs(o.hours_to_go - best.hours_to_go) < 1e-6
+        and abs(o.min_pct - best.min_pct) < 1e-6
+    ]
+    return max(same + [best], key=lambda o: o.speed)
 
 
 def _pause_option(s, m, p, cfg, duty) -> _Option:
